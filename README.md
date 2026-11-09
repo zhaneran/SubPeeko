@@ -72,12 +72,13 @@ retried automatically.
 
 ## How it works and current limits
 
-The original Chinese and nearby dialogue are sent to the configured model as
-context when a sentence needs model review. Word-list hints are local, exact
-simple exchanges are handled locally, and model requests are batched. Use
-`--all-model` to include even the locally handled exchanges in a model run for
-comparison. The model can still miss a language point or misjudge its level or
-meaning; review the output before relying on it for learning.
+Each identified bilingual dialogue is sent to the configured model, along with
+the original Chinese and nearby dialogue as context. Word-list hints are
+computed locally, and dialogues are grouped into batches to reduce the number
+of requests. Local rules do not skip dialogue based on its apparent difficulty:
+that optimization needs comparison with human annotations and an all-model
+baseline first. The model can still miss a language point or misjudge its level
+or meaning; review the output before relying on it for learning.
 
 SubPeeko preserves original event timing, English text, styles, metadata, and
 other events. It processes confidently identified bilingual dialogue whose

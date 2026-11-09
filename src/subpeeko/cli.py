@@ -10,7 +10,7 @@ from pathlib import Path
 
 from . import __version__
 from .config import ConfigError, configure, load_config, show_config
-from .model import BATCH_SIZE, ModelClient, ModelError, local_simple
+from .model import BATCH_SIZE, ModelClient, ModelError
 from .subtitles import AssFile, SubtitleError
 from .vocabulary import LEVELS
 
@@ -38,7 +38,6 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--recursive", action="store_true", help="include subdirectories")
     result.add_argument("--overwrite", action="store_true", help="replace existing generated output")
     result.add_argument("--dry-run", action="store_true", help="list input and output paths without calling the model")
-    result.add_argument("--all-model", action="store_true", help="also send simple exchanges to the model for comparison")
     result.add_argument("--batch-size", type=_batch_size, default=BATCH_SIZE, help=f"dialogues per model request (default: {BATCH_SIZE})")
     result.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return result
@@ -132,17 +131,14 @@ def _convert(args: argparse.Namespace) -> int:
             subtitles = AssFile.read(path)
             if not subtitles.dialogues:
                 raise SubtitleError("No supported bilingual dialogue found")
-            if not args.all_model and all(local_simple(item, args.level) for item in subtitles.dialogues):
-                notes = {item.id: "" for item in subtitles.dialogues}
-            else:
-                if client is None:
-                    client = ModelClient(load_config(), batch_size=args.batch_size)
-                print(f"Processing: {path} ({len(subtitles.dialogues)} bilingual dialogue(s))", flush=True)
-                notes = client.analyze(
-                    subtitles.dialogues, args.level, all_model=args.all_model,
-                    progress=lambda done, total: print(f"  Reviewed {done}/{total} dialogue(s).", flush=True),
-                    on_retry=lambda message: print(f"  {message}", file=sys.stderr, flush=True),
-                )
+            if client is None:
+                client = ModelClient(load_config(), batch_size=args.batch_size)
+            print(f"Processing: {path} ({len(subtitles.dialogues)} bilingual dialogue(s))", flush=True)
+            notes = client.analyze(
+                subtitles.dialogues, args.level,
+                progress=lambda done, total: print(f"  Reviewed {done}/{total} dialogue(s).", flush=True),
+                on_retry=lambda message: print(f"  {message}", file=sys.stderr, flush=True),
+            )
             result = subtitles.render(notes)
             _write_output(output, result, args.overwrite)
             succeeded += 1
@@ -153,8 +149,6 @@ def _convert(args: argparse.Namespace) -> int:
             failed += 1
             print(f"Failed: {path}: {exc}", file=sys.stderr)
     print(f"Finished: {succeeded} created, {failed} failed; {client.requests if client else 0} model request(s).")
-    if client:
-        print(f"Local simple exchanges: {client.local_count}; exact-context reuse: {client.cached_count}.")
     return 1 if failed else 0
 
 

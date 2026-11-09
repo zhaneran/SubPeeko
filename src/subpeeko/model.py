@@ -40,42 +40,6 @@ Return ONLY JSON: {"items":[{"id":1,"notes":[{"span":"exact English text",
 target id, including an empty notes array when no annotation is needed.
 """
 
-# These exact short exchanges contain no phrase or grammar beyond high school.
-# All other dialogue remains eligible for contextual model review.
-SIMPLE_EXCHANGES = {
-    "yes": {"是", "是的", "对", "对的", "好", "是啊", "没错", "行", "当然"},
-    "yeah": {"嗯", "是", "是的", "对", "对的", "好", "行", "是啊", "没错"},
-    "no": {"不", "不是", "不行", "不会", "不用", "没有"},
-    "okay": {"好", "好的", "好吧", "好了", "行"},
-    "ok": {"好", "好的", "好吧", "好了", "行"},
-    "hello": {"你好", "哈喽"},
-    "hi": {"嗨", "你好"},
-    "hey": {"嘿", "嗨"},
-    "oh": {"哦", "噢", "啊"},
-    "wow": {"哇"},
-    "what": {"什么", "怎么", "怎么了", "什么事"},
-    "who": {"谁"},
-    "where": {"哪", "哪里", "在哪", "在哪里"},
-    "why": {"为什么", "为何"},
-    "how": {"怎样", "怎么", "怎么样", "如何"},
-    "wait": {"等", "等等", "等一下", "等一等", "等着"},
-    "go": {"走", "走吧", "走啊"},
-    "stop": {"停", "停下", "停下来", "住手"},
-    "run": {"跑", "快跑"},
-    "help": {"救命", "救我", "帮忙", "帮帮我"},
-    "listen": {"听着", "听我说"},
-    "please": {"请", "求你", "拜托"},
-    "sure": {"当然", "好的", "行"},
-    "right": {"对", "对的", "是", "没错"},
-    "come": {"来", "过来"},
-    "thanks": {"谢谢", "多谢"},
-    "thank you": {"谢谢", "谢谢你", "多谢"},
-    "sorry": {"对不起", "抱歉"},
-    "goodbye": {"再见"},
-    "bye": {"再见"},
-}
-
-
 class ModelError(Exception):
     def __init__(self, message: str, *, split_batch: bool = False, retryable: bool = False):
         super().__init__(message)
@@ -88,12 +52,6 @@ class _NoRedirect(HTTPRedirectHandler):
         return None
 
 
-def local_simple(dialogue: Dialogue, level: str) -> bool:
-    english = re.sub(r"^[\s\W_]+|[\s\W_]+$", "", dialogue.english.casefold())
-    chinese = re.sub(r"^[\s\W_]+|[\s\W_]+$", "", dialogue.chinese)
-    return chinese in SIMPLE_EXCHANGES.get(english, set()) and not vocabulary_hints(dialogue.english, level)
-
-
 def _clean(text: str) -> str:
     return " ".join(text.replace("{", "（").replace("}", "）").replace("\\", "＼").split())
 
@@ -103,8 +61,6 @@ class ModelClient:
         self.config = config
         self.batch_size = batch_size
         self.requests = 0
-        self.local_count = 0
-        self.cached_count = 0
 
     def _request(self, messages: list[dict[str, str]]) -> str:
         url = self.config.base_url.rstrip("/") + "/chat/completions"
@@ -148,32 +104,13 @@ class ModelClient:
     def test_connection(self) -> None:
         self._request([{"role": "user", "content": "Reply with OK."}])
 
-    @staticmethod
-    def _context(dialogues: list[Dialogue], index: int) -> tuple:
-        target = dialogues[index]
-        neighbors = tuple((item.english, item.chinese) for item in dialogues[max(0, index - 2):index + 3])
-        return (target.english, target.chinese, index - max(0, index - 2), neighbors)
-
     def analyze(
-        self, dialogues: list[Dialogue], level: str, all_model: bool = False,
+        self, dialogues: list[Dialogue], level: str,
         progress: Callable[[int, int], None] | None = None,
         on_retry: Callable[[str], None] | None = None,
     ) -> dict[int, str]:
         results: dict[int, str] = {}
-        pending: list[int] = []
-        groups: dict[tuple, list[int]] = {}
-        for index, dialogue in enumerate(dialogues):
-            if not all_model and local_simple(dialogue, level):
-                results[dialogue.id] = ""
-                self.local_count += 1
-                continue
-            key = self._context(dialogues, index)
-            if key in groups:
-                groups[key].append(index)
-                self.cached_count += 1
-            else:
-                groups[key] = [index]
-                pending.append(index)
+        pending = list(range(len(dialogues)))
 
         if progress:
             progress(len(results), len(dialogues))
@@ -215,9 +152,7 @@ class ModelClient:
                     process(batch, retry=False)
                     return
                 raise
-            for index in batch:
-                for duplicate in groups[self._context(dialogues, index)]:
-                    results[dialogues[duplicate].id] = parsed[dialogues[index].id]
+            results.update(parsed)
             if progress:
                 progress(len(results), len(dialogues))
 

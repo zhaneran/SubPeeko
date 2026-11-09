@@ -2,6 +2,8 @@ import contextlib
 import io
 import json
 import os
+import subprocess
+import sysconfig
 import tempfile
 import threading
 import unittest
@@ -11,7 +13,7 @@ from unittest.mock import patch
 
 from subpeeko import cli, config
 from subpeeko.config import Config
-from subpeeko.model import ModelClient, ModelError, local_simple
+from subpeeko.model import ModelClient, ModelError
 from subpeeko.subtitles import AssFile, Dialogue, SubtitleError
 from subpeeko.vocabulary import ambiguous_words, vocabulary_hints
 
@@ -92,12 +94,18 @@ class VocabularyTests(unittest.TestCase):
 
 
 class ModelTests(unittest.TestCase):
-    def test_local_simple_is_deliberately_narrow(self):
-        self.assertTrue(local_simple(dialogue(1, "Yes!", "是的"), "highschool"))
-        self.assertFalse(local_simple(dialogue(2, "You really pulled it off.", "你居然做到了"), "highschool"))
-        self.assertFalse(local_simple(dialogue(3, "Yes.", "我没事"), "highschool"))
-        self.assertFalse(local_simple(dialogue(4, "Okay.", "好的"), "highschool"))
-        self.assertTrue(local_simple(dialogue(4, "Okay.", "好的"), "cet4"))
+    def test_simple_and_duplicate_dialogues_are_all_reviewed(self):
+        client = ModelClient(Config("http://127.0.0.1/v1", "test", "secret"), batch_size=20)
+        records = [dialogue(i, "Yes!", "是的") for i in range(1, 8)]
+
+        def respond(messages):
+            payload = json.loads(messages[-1]["content"])
+            return json.dumps({"items": [{"id": i, "notes": []} for i in payload["target_ids"]]})
+
+        with patch.object(client, "_request", side_effect=respond) as request:
+            result = client.analyze(records, "highschool")
+        self.assertEqual(set(result), set(range(1, 8)))
+        self.assertEqual(json.loads(request.call_args.args[0][-1]["content"])["target_ids"], list(range(1, 8)))
 
     def test_filters_levels_validates_spans_and_escapes_tags(self):
         expected = {1: dialogue(1, "The device had a malfunction.", "装置似乎发生故障")}
@@ -133,7 +141,7 @@ class ModelTests(unittest.TestCase):
             return json.dumps({"items": [{"id": i, "notes": []} for i in payload["target_ids"]]})
 
         with patch.object(client, "_request", side_effect=respond):
-            result = client.analyze(records, "cet4", all_model=True, progress=lambda done, total: progress.append((done, total)))
+            result = client.analyze(records, "cet4", progress=lambda done, total: progress.append((done, total)))
         self.assertEqual(len(result), 45)
         self.assertEqual(len(payloads), 3)
         self.assertTrue(all(len(item["target_ids"]) <= 20 for item in payloads))
@@ -149,9 +157,8 @@ class ModelTests(unittest.TestCase):
             return json.dumps({"items": [{"id": i, "notes": []} for i in payload["target_ids"]]})
 
         with patch.object(client, "_request", side_effect=respond) as request:
-            result = client.analyze(records, "cet4", all_model=True)
+            result = client.analyze(records, "cet4")
         self.assertEqual(set(result), {1, 2})
-        self.assertEqual(client.cached_count, 0)
         self.assertEqual(len(json.loads(request.call_args.args[0][-1]["content"])["target_ids"]), 2)
 
     def test_large_failed_batch_is_split_and_recovered(self):
@@ -169,7 +176,7 @@ class ModelTests(unittest.TestCase):
             return json.dumps({"items": [{"id": i, "notes": []} for i in ids]})
 
         with patch.object(client, "_request", side_effect=respond):
-            result = client.analyze(records, "cet4", all_model=True, on_retry=retries.append)
+            result = client.analyze(records, "cet4", on_retry=retries.append)
         self.assertEqual(set(result), set(range(1, 7)))
         self.assertEqual(sizes, [6, 3, 1, 2, 3, 1, 2])
         self.assertEqual(len(retries), 3)
@@ -295,7 +302,7 @@ class CliIntegrationTests(unittest.TestCase):
         self.assertIn(r"{\rEng}The device had a malfunction.", generated)
         self.assertIn("[Aegisub Extradata]", generated)
         self.assertEqual(MockHandler.calls[0][0], "/v1/chat/completions")
-        self.assertEqual(len(MockHandler.calls[0][1]["target_ids"]), 1)
+        self.assertEqual(len(MockHandler.calls[0][1]["target_ids"]), 2)
         self.assertIn("1 model request", output)
         status, _, error = self.run_cli([str(source), "--level", "highschool"])
         self.assertEqual(status, 1)
@@ -316,6 +323,19 @@ class CliIntegrationTests(unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertIn("2 file(s)", output)
         self.assertEqual(MockHandler.calls, [])
+
+    def test_installed_console_command_accepts_unicode_paths(self):
+        source = self.root / "字幕 with spaces.ass"
+        source.write_bytes(ASS.encode("utf-8"))
+        executable = Path(sysconfig.get_path("scripts")) / ("subpeeko.exe" if os.name == "nt" else "subpeeko")
+        self.assertTrue(executable.exists(), f"Missing installed command: {executable}")
+        result = subprocess.run(
+            [str(executable), str(source), "--level", "cet4", "--dry-run"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("1 file(s)", result.stdout)
+        self.assertFalse((self.root / "字幕 with spaces.cet4.subpeeko.ass").exists())
 
     def test_recursive_batch_continues_after_a_bad_file(self):
         first = self.root / "one.ass"
@@ -343,7 +363,7 @@ class CliIntegrationTests(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertIn("invalid annotations", error)
         self.assertFalse((self.root / "bad.highschool.subpeeko.ass").exists())
-        self.assertEqual(len(MockHandler.calls), 2)
+        self.assertEqual(len(MockHandler.calls), 3)
 
     def test_overwrite_preserves_existing_output_if_model_fails(self):
         source = self.root / "movie.ass"
