@@ -332,8 +332,10 @@ class CliIntegrationTests(unittest.TestCase):
         result = subprocess.run(
             [str(executable), str(source), "--level", "cet4", "--dry-run"],
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+            env={**os.environ, "PYTHONIOENCODING": "ascii:strict"},
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(r"\u5b57\u5e55", result.stdout)
         self.assertIn("1 file(s)", result.stdout)
         self.assertFalse((self.root / "字幕 with spaces.cet4.subpeeko.ass").exists())
 

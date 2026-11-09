@@ -153,6 +153,10 @@ def _convert(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Redirected Windows output may use an encoding that cannot represent paths.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="backslashreplace")
     argv = list(sys.argv[1:] if argv is None else argv)
     try:
         if argv and argv[0] == "config":
