@@ -1,0 +1,16 @@
+# Local subtitle samples and credentials
+/sample/
+.env
+.env.*
+!.env.example
+
+# Common development artifacts
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+node_modules/
+/build/
+/dist/
+.DS_Store
+Thumbs.db
