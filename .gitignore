@@ -1,5 +1,6 @@
 # Local subtitle samples and credentials
 /sample/
+*.subpeeko.ass
 .env
 .env.*
 !.env.example
@@ -7,6 +8,7 @@
 # Common development artifacts
 __pycache__/
 *.py[cod]
+*.egg-info/
 .venv/
 .pytest_cache/
 node_modules/

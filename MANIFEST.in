@@ -1,0 +1,5 @@
+prune sample
+exclude .env
+exclude .env.*
+global-exclude .env .env.* *.[aA][sS][sS]
+include THIRD_PARTY_NOTICES.md
