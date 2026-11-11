@@ -70,6 +70,33 @@ Model requests contain up to five target dialogues by default; use
 larger or smaller requests. Timed-out or malformed batches are split and
 retried automatically.
 
+To process batches concurrently, supply the quota available to this process:
+
+```bash
+subpeeko "movie.ass" --level cet4 --concurrency 4 --rpm 60 --tpm 100000 --qps 0.5
+```
+
+These numbers are examples, not provider defaults. `--rpm` and `--tpm` are
+required when concurrency exceeds one; `--qps` is optional and is capped at
+RPM / 60. The limiter uses 80% of the supplied quotas, spreads requests, and
+reserves estimated input plus output tokens for every request, including
+retries. `--max-output-tokens` controls the output reservation and API output
+limit when rate limiting is enabled (default: 2048). Oversized batches may be
+split after a failed response. A 429 response pauses subsequent requests before
+one retry, using a numeric `Retry-After` when supplied.
+
+Token reservation uses request UTF-8 bytes plus a fixed allowance rather than
+the provider's tokenizer. This is a conservative estimate, not a guarantee:
+providers may use different accounting or burst rules, and account quotas may
+be shared with other processes. Allocate only this process's available share and
+monitor the provider's actual usage. Serial operation remains the default.
+
+Alibaba Cloud's `decision-model-preview` uses the separate
+[System One API](https://help.aliyun.com/zh/model-studio/decision-model-api)
+and does not generate text, so it cannot replace the Chat Completions model
+needed to produce Chinese explanations. Its use as a pre-filter requires an
+accuracy evaluation before any dialogue can be skipped.
+
 ## How it works and current limits
 
 Each identified bilingual dialogue is sent to the configured model, along with
@@ -90,10 +117,24 @@ file. Review long annotations for readability during short subtitle events.
 
 The local `sample/` directory is excluded from Git and distribution packages.
 Use subtitles you are allowed to process; their text is sent to your configured
-model provider. Vocabulary data provenance and license information are in
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The source lists are useful
-references but are not official exam syllabuses, and their underlying
+model provider.
+
+## Vocabulary source and updates
+
+The bundled word list is derived from
+[KyleBing/english-vocabulary](https://github.com/KyleBing/english-vocabulary),
+which provides a BSD 3-Clause license. SubPeeko keeps normalized word heads and
+their earliest associated level. The exact upstream revision in each package is
+recorded in `subpeeko/data/vocabulary-source.json`; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for attribution and provenance.
+These lists are references, not official exam syllabuses. The underlying data's
 redistribution permissions need review before public release.
+
+Each source-distribution or wheel build checks the upstream repository for a
+new revision and, when available, builds an updated list into the package. It
+checks the upstream license and validates the downloaded lists first. If the
+check fails, the build warns and uses the bundled snapshot. The source checkout
+is not modified, and installed SubPeeko does not fetch vocabulary at runtime.
 
 ## Development
 

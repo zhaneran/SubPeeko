@@ -6,6 +6,7 @@ import subprocess
 import sysconfig
 import tempfile
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -14,6 +15,7 @@ from unittest.mock import patch
 from subpeeko import cli, config
 from subpeeko.config import Config
 from subpeeko.model import ModelClient, ModelError
+from subpeeko.rate_limit import RateLimiter
 from subpeeko.subtitles import AssFile, Dialogue, SubtitleError
 from subpeeko.vocabulary import ambiguous_words, vocabulary_hints
 
@@ -181,6 +183,60 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(sizes, [6, 3, 1, 2, 3, 1, 2])
         self.assertEqual(len(retries), 3)
 
+    def test_concurrent_batches_preserve_all_targets(self):
+        client = ModelClient(Config("http://127.0.0.1/v1", "test", "secret"), batch_size=1, workers=3)
+        records = [dialogue(i, f"Sentence {i}", f"中文{i}") for i in range(1, 7)]
+        lock = threading.Lock()
+        active = maximum = 0
+
+        def respond(messages):
+            nonlocal active, maximum
+            payload = json.loads(messages[-1]["content"])
+            with lock:
+                active += 1
+                maximum = max(maximum, active)
+            time.sleep(0.05)
+            with lock:
+                active -= 1
+            return json.dumps({"items": [{"id": i, "notes": []} for i in payload["target_ids"]]})
+
+        with patch.object(client, "_request", side_effect=respond):
+            result = client.analyze(records, "cet4")
+        self.assertEqual(set(result), set(range(1, 7)))
+        self.assertGreaterEqual(maximum, 2)
+        self.assertLessEqual(maximum, 3)
+
+    def test_rate_limit_response_defers_all_workers_before_retry(self):
+        client = ModelClient(Config("http://127.0.0.1/v1", "test", "secret"))
+        client.limiter = unittest.mock.Mock()
+        response = json.dumps({"items": [{"id": 1, "notes": []}]})
+        error = ModelError("rate limited", retryable=True, rate_limited=True, retry_delay=4)
+        with patch.object(client, "_request", side_effect=[error, response]) as request:
+            self.assertEqual(client.analyze([dialogue(1, "Hi", "你好")], "cet4"), {1: ""})
+        self.assertEqual(request.call_count, 2)
+        client.limiter.defer.assert_called_once_with(4)
+
+
+class RateLimitTests(unittest.TestCase):
+    def test_smooths_requests_and_respects_rolling_token_reservations(self):
+        clock = [0.0]
+
+        def advance(seconds):
+            clock[0] += seconds
+
+        with patch("subpeeko.rate_limit.monotonic", side_effect=lambda: clock[0]), patch("subpeeko.rate_limit.sleep", side_effect=advance):
+            limiter = RateLimiter(rpm=120, tpm=1000, qps=2)
+            limiter.acquire(300)
+            limiter.acquire(300)
+            self.assertEqual(clock[0], 22.5)
+            limiter.acquire(300)
+            self.assertEqual(clock[0], 60)
+            limiter.defer(5)
+            limiter.acquire(100)
+            self.assertGreaterEqual(clock[0], 65)
+            with self.assertRaises(ValueError):
+                limiter.acquire(801)
+
 
 class ConfigTests(unittest.TestCase):
     def test_environment_overrides_saved_configuration_and_key_is_not_displayed(self):
@@ -214,6 +270,7 @@ class ConfigTests(unittest.TestCase):
 
 class MockHandler(BaseHTTPRequestHandler):
     calls = []
+    max_tokens = []
     invalid = False
     redirect = False
     redirected_requests = 0
@@ -225,6 +282,7 @@ class MockHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        type(self).max_tokens.append(request.get("max_tokens"))
         payload = json.loads(request["messages"][-1]["content"])
         type(self).calls.append((self.path, payload))
         if type(self).invalid:
@@ -269,6 +327,7 @@ class CliIntegrationTests(unittest.TestCase):
 
     def setUp(self):
         MockHandler.calls = []
+        MockHandler.max_tokens = []
         MockHandler.invalid = False
         MockHandler.redirect = False
         MockHandler.redirected_requests = 0
@@ -338,6 +397,24 @@ class CliIntegrationTests(unittest.TestCase):
         self.assertIn(r"\u5b57\u5e55", result.stdout)
         self.assertIn("1 file(s)", result.stdout)
         self.assertFalse((self.root / "字幕 with spaces.cet4.subpeeko.ass").exists())
+
+    def test_concurrent_cli_uses_shared_limits_and_output_reservation(self):
+        source = self.root / "movie.ass"
+        source.write_bytes(ASS.encode("utf-8"))
+        status, output, error = self.run_cli([
+            str(source), "--level", "highschool", "--batch-size", "1", "--concurrency", "2",
+            "--rpm", "6000", "--tpm", "600000", "--qps", "100", "--max-output-tokens", "256",
+        ])
+        self.assertEqual(status, 0, error)
+        self.assertIn("2 model request", output)
+        self.assertEqual(MockHandler.max_tokens, [256, 256])
+        self.assertEqual({item for _, payload in MockHandler.calls for item in payload["target_ids"]}, {1, 2})
+
+    def test_concurrency_requires_rpm_and_tpm(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as error:
+                cli.main([str(self.root), "--level", "cet4", "--concurrency", "2"])
+        self.assertEqual(error.exception.code, 2)
 
     def test_recursive_batch_continues_after_a_bad_file(self):
         first = self.root / "one.ass"

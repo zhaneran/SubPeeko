@@ -6,10 +6,13 @@ import json
 import re
 import time
 from collections.abc import Callable
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from threading import Lock
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .config import Config
+from .rate_limit import RateLimiter
 from .subtitles import Dialogue
 from .vocabulary import LEVELS, WORDS, ambiguous_words, vocabulary_hints
 
@@ -41,10 +44,12 @@ target id, including an empty notes array when no annotation is needed.
 """
 
 class ModelError(Exception):
-    def __init__(self, message: str, *, split_batch: bool = False, retryable: bool = False):
+    def __init__(self, message: str, *, split_batch: bool = False, retryable: bool = False, retry_delay: float = 0.5, rate_limited: bool = False):
         super().__init__(message)
         self.split_batch = split_batch
         self.retryable = retryable
+        self.retry_delay = retry_delay
+        self.rate_limited = rate_limited
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -57,29 +62,51 @@ def _clean(text: str) -> str:
 
 
 class ModelClient:
-    def __init__(self, config: Config, batch_size: int = BATCH_SIZE):
+    def __init__(self, config: Config, batch_size: int = BATCH_SIZE, *, workers: int = 1,
+                 rpm: int | None = None, tpm: int | None = None, qps: float | None = None,
+                 max_output_tokens: int = 2048):
         self.config = config
         self.batch_size = batch_size
+        self.workers = workers
+        self.limiter = RateLimiter(rpm, tpm, qps) if rpm is not None and tpm is not None else None
+        self.max_output_tokens = max_output_tokens
         self.requests = 0
+        self.lock = Lock()
 
     def _request(self, messages: list[dict[str, str]]) -> str:
         url = self.config.base_url.rstrip("/") + "/chat/completions"
-        body = json.dumps({"model": self.config.model_name, "messages": messages}, ensure_ascii=False).encode("utf-8")
+        payload = {"model": self.config.model_name, "messages": messages}
+        if self.limiter:
+            payload["max_tokens"] = self.max_output_tokens
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        ticket = None
+        if self.limiter:
+            try:
+                # ponytail: byte-count reservation is conservative, not a provider tokenizer.
+                ticket = self.limiter.acquire(len(body) + self.max_output_tokens + 512)
+            except ValueError as exc:
+                raise ModelError(str(exc), split_batch=True) from exc
         request = Request(url, data=body, headers={
             "Authorization": "Bearer " + self.config.api_key,
             "Content-Type": "application/json",
             "Accept": "application/json",
         })
-        self.requests += 1
+        with self.lock:
+            self.requests += 1
         try:
             with build_opener(_NoRedirect).open(request, timeout=120) as response:
                 result = json.loads(response.read(10_000_001))
         except HTTPError as exc:
             status = exc.code
+            try:
+                delay = max(2.0, min(60.0, float((exc.headers or {}).get("Retry-After", 2)))) if status == 429 else 0.5
+            except (TypeError, ValueError):
+                delay = 2.0
             exc.close()
             raise ModelError(
                 f"Model API returned HTTP {status}",
                 split_batch=status in (408, 413), retryable=status == 429 or status >= 500,
+                rate_limited=status == 429, retry_delay=delay,
             ) from exc
         except TimeoutError as exc:
             raise ModelError("Model API request timed out", split_batch=True, retryable=True) from exc
@@ -93,6 +120,11 @@ class ModelClient:
             raise ModelError("Cannot reach the model API", retryable=True) from exc
         except (ValueError, UnicodeDecodeError) as exc:
             raise ModelError("Model API returned invalid JSON", split_batch=True, retryable=True) from exc
+        if self.limiter and ticket is not None and isinstance(result, dict):
+            usage = result.get("usage")
+            used = usage.get("total_tokens") if isinstance(usage, dict) else None
+            if type(used) is int and used >= 0:
+                self.limiter.adjust(ticket, used)
         try:
             content = result["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
@@ -110,8 +142,6 @@ class ModelClient:
         on_retry: Callable[[str], None] | None = None,
     ) -> dict[int, str]:
         results: dict[int, str] = {}
-        pending = list(range(len(dialogues)))
-
         if progress:
             progress(len(results), len(dialogues))
         batch_limit = self.batch_size
@@ -139,28 +169,36 @@ class ModelClient:
             except ModelError as exc:
                 if exc.split_batch and len(batch) > 1:
                     midpoint = len(batch) // 2
-                    batch_limit = min(batch_limit, midpoint)
+                    with self.lock:
+                        batch_limit = min(batch_limit, midpoint)
                     if on_retry:
                         on_retry(f"{exc}; retrying in batches of {midpoint} and {len(batch) - midpoint}.")
-                    process(batch[:midpoint])
-                    process(batch[midpoint:])
-                    return
+                    return process(batch[:midpoint]) | process(batch[midpoint:])
                 if exc.retryable and retry:
                     if on_retry:
                         on_retry(f"{exc}; retrying once.")
-                    time.sleep(0.5)
-                    process(batch, retry=False)
-                    return
+                    if exc.rate_limited and self.limiter:
+                        self.limiter.defer(exc.retry_delay)
+                    else:
+                        time.sleep(exc.retry_delay)
+                    return process(batch, retry=False)
                 raise
-            results.update(parsed)
-            if progress:
-                progress(len(results), len(dialogues))
+            return parsed
 
         start = 0
-        while start < len(pending):
-            batch = pending[start:start + batch_limit]
-            process(batch)
-            start += len(batch)
+        futures = set()
+        with ThreadPoolExecutor(max_workers=self.workers) as executor:
+            while start < len(dialogues) or futures:
+                while start < len(dialogues) and len(futures) < self.workers:
+                    with self.lock:
+                        end = min(start + batch_limit, len(dialogues))
+                    futures.add(executor.submit(process, list(range(start, end))))
+                    start = end
+                completed, futures = wait(futures, return_when=FIRST_COMPLETED)
+                for future in completed:
+                    results.update(future.result())
+                    if progress:
+                        progress(len(results), len(dialogues))
         return results
 
     @staticmethod

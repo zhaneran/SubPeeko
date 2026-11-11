@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import sys
 import tempfile
@@ -27,6 +28,26 @@ def _batch_size(value: str) -> int:
     raise argparse.ArgumentTypeError("batch size must be an integer between 1 and 100")
 
 
+def _positive_int(value: str) -> int:
+    try:
+        number = int(value)
+        if number > 0:
+            return number
+    except ValueError:
+        pass
+    raise argparse.ArgumentTypeError("must be a positive integer")
+
+
+def _positive_float(value: str) -> float:
+    try:
+        number = float(value)
+        if math.isfinite(number) and number > 0:
+            return number
+    except ValueError:
+        pass
+    raise argparse.ArgumentTypeError("must be a positive finite number")
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(
         prog="subpeeko",
@@ -39,6 +60,11 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--overwrite", action="store_true", help="replace existing generated output")
     result.add_argument("--dry-run", action="store_true", help="list input and output paths without calling the model")
     result.add_argument("--batch-size", type=_batch_size, default=BATCH_SIZE, help=f"dialogues per model request (default: {BATCH_SIZE})")
+    result.add_argument("--concurrency", type=_positive_int, default=1, help="parallel model requests (default: 1; requires --rpm and --tpm)")
+    result.add_argument("--rpm", type=_positive_int, help="available requests per minute for this process")
+    result.add_argument("--tpm", type=_positive_int, help="available input and output tokens per minute for this process")
+    result.add_argument("--qps", type=_positive_float, help="maximum requests per second; defaults to RPM / 60")
+    result.add_argument("--max-output-tokens", type=_positive_int, default=2048, help="output token reservation when rate limiting (default: 2048)")
     result.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return result
 
@@ -132,7 +158,10 @@ def _convert(args: argparse.Namespace) -> int:
             if not subtitles.dialogues:
                 raise SubtitleError("No supported bilingual dialogue found")
             if client is None:
-                client = ModelClient(load_config(), batch_size=args.batch_size)
+                client = ModelClient(
+                    load_config(), batch_size=args.batch_size, workers=args.concurrency,
+                    rpm=args.rpm, tpm=args.tpm, qps=args.qps, max_output_tokens=args.max_output_tokens,
+                )
             print(f"Processing: {path} ({len(subtitles.dialogues)} bilingual dialogue(s))", flush=True)
             notes = client.analyze(
                 subtitles.dialogues, args.level,
@@ -161,7 +190,15 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if argv and argv[0] == "config":
             return _config_command(argv[1:])
-        return _convert(parser().parse_args(argv))
+        p = parser()
+        args = p.parse_args(argv)
+        if (args.rpm is None) != (args.tpm is None):
+            p.error("--rpm and --tpm must be provided together")
+        if (args.concurrency > 1 or args.qps is not None) and args.rpm is None:
+            p.error("--concurrency > 1 and --qps require both --rpm and --tpm")
+        if args.concurrency > 32:
+            p.error("--concurrency must not exceed 32")
+        return _convert(args)
     except (ConfigError, ModelError, SubtitleError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
