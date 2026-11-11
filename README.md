@@ -70,15 +70,22 @@ Model requests contain up to five target dialogues by default; use
 larger or smaller requests. Timed-out or malformed batches are split and
 retried automatically.
 
-To process batches concurrently, supply the quota available to this process:
+SubPeeko processes up to four batches concurrently by default. The default
+per-process budgets are 60 requests per minute and 5,000,000 input and output
+tokens per minute. The TPM default matches an Alibaba Cloud `qwen3.8-flash`
+quota in Beijing; the RPM default is a conservative client setting, not a
+provider limit. Check your provider, model, region, and account quota before
+using these defaults, and reserve capacity for any other applications.
+
+The defaults can be changed independently. For example:
 
 ```bash
-subpeeko "movie.ass" --level cet4 --concurrency 4 --rpm 60 --tpm 100000 --qps 0.5
+subpeeko "movie.ass" --level cet4 --concurrency 2 --rpm 30 --tpm 500000 --qps 0.5
+subpeeko "movie.ass" --level cet4 --concurrency 1  # process batches serially
 ```
 
-These numbers are examples, not provider defaults. `--rpm` and `--tpm` are
-required when concurrency exceeds one; `--qps` is optional and is capped at
-RPM / 60. The limiter uses 80% of the supplied quotas, spreads requests, and
+`--qps` is optional and is capped at RPM / 60. The limiter uses 80% of the
+configured quotas, spreads requests, and
 reserves estimated input plus output tokens for every request, including
 retries. `--max-output-tokens` controls the output reservation and API output
 limit when rate limiting is enabled (default: 2048). Oversized batches may be
@@ -89,7 +96,7 @@ Token reservation uses request UTF-8 bytes plus a fixed allowance rather than
 the provider's tokenizer. This is a conservative estimate, not a guarantee:
 providers may use different accounting or burst rules, and account quotas may
 be shared with other processes. Allocate only this process's available share and
-monitor the provider's actual usage. Serial operation remains the default.
+monitor the provider's actual usage.
 
 Alibaba Cloud's `decision-model-preview` uses the separate
 [System One API](https://help.aliyun.com/zh/model-studio/decision-model-api)

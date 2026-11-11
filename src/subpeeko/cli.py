@@ -11,7 +11,7 @@ from pathlib import Path
 
 from . import __version__
 from .config import ConfigError, configure, load_config, show_config
-from .model import BATCH_SIZE, ModelClient, ModelError
+from .model import BATCH_SIZE, DEFAULT_CONCURRENCY, DEFAULT_RPM, DEFAULT_TPM, ModelClient, ModelError
 from .subtitles import AssFile, SubtitleError
 from .vocabulary import LEVELS
 
@@ -60,9 +60,9 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--overwrite", action="store_true", help="replace existing generated output")
     result.add_argument("--dry-run", action="store_true", help="list input and output paths without calling the model")
     result.add_argument("--batch-size", type=_batch_size, default=BATCH_SIZE, help=f"dialogues per model request (default: {BATCH_SIZE})")
-    result.add_argument("--concurrency", type=_positive_int, default=1, help="parallel model requests (default: 1; requires --rpm and --tpm)")
-    result.add_argument("--rpm", type=_positive_int, help="available requests per minute for this process")
-    result.add_argument("--tpm", type=_positive_int, help="available input and output tokens per minute for this process")
+    result.add_argument("--concurrency", type=_positive_int, default=DEFAULT_CONCURRENCY, help=f"parallel model requests (default: {DEFAULT_CONCURRENCY})")
+    result.add_argument("--rpm", type=_positive_int, default=DEFAULT_RPM, help=f"available requests per minute for this process (default: {DEFAULT_RPM})")
+    result.add_argument("--tpm", type=_positive_int, default=DEFAULT_TPM, help=f"available input and output tokens per minute (default: {DEFAULT_TPM})")
     result.add_argument("--qps", type=_positive_float, help="maximum requests per second; defaults to RPM / 60")
     result.add_argument("--max-output-tokens", type=_positive_int, default=2048, help="output token reservation when rate limiting (default: 2048)")
     result.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -192,10 +192,6 @@ def main(argv: list[str] | None = None) -> int:
             return _config_command(argv[1:])
         p = parser()
         args = p.parse_args(argv)
-        if (args.rpm is None) != (args.tpm is None):
-            p.error("--rpm and --tpm must be provided together")
-        if (args.concurrency > 1 or args.qps is not None) and args.rpm is None:
-            p.error("--concurrency > 1 and --qps require both --rpm and --tpm")
         if args.concurrency > 32:
             p.error("--concurrency must not exceed 32")
         return _convert(args)

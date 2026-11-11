@@ -97,7 +97,7 @@ class VocabularyTests(unittest.TestCase):
 
 class ModelTests(unittest.TestCase):
     def test_simple_and_duplicate_dialogues_are_all_reviewed(self):
-        client = ModelClient(Config("http://127.0.0.1/v1", "test", "secret"), batch_size=20)
+        client = ModelClient(Config("http://127.0.0.1/v1", "test", "secret"), batch_size=20, workers=1)
         records = [dialogue(i, "Yes!", "是的") for i in range(1, 8)]
 
         def respond(messages):
@@ -132,7 +132,7 @@ class ModelTests(unittest.TestCase):
         self.assertIn("离开", ModelClient._parse(json.dumps(data), expected, "cet4")[1])
 
     def test_batches_and_preserves_individual_target_identity(self):
-        client = ModelClient(Config("http://127.0.0.1/v1", "test", "secret"), batch_size=20)
+        client = ModelClient(Config("http://127.0.0.1/v1", "test", "secret"), batch_size=20, workers=1)
         records = [dialogue(i, f"Unfamiliarword{i}", f"中文{i}") for i in range(1, 46)]
         payloads = []
         progress = []
@@ -164,7 +164,7 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(len(json.loads(request.call_args.args[0][-1]["content"])["target_ids"]), 2)
 
     def test_large_failed_batch_is_split_and_recovered(self):
-        client = ModelClient(Config("http://127.0.0.1/v1", "test", "secret"), batch_size=20)
+        client = ModelClient(Config("http://127.0.0.1/v1", "test", "secret"), batch_size=20, workers=1)
         records = [dialogue(i, f"Unfamiliarword{i}", f"中文{i}") for i in range(1, 7)]
         sizes = []
         retries = []
@@ -410,11 +410,31 @@ class CliIntegrationTests(unittest.TestCase):
         self.assertEqual(MockHandler.max_tokens, [256, 256])
         self.assertEqual({item for _, payload in MockHandler.calls for item in payload["target_ids"]}, {1, 2})
 
-    def test_concurrency_requires_rpm_and_tpm(self):
-        with contextlib.redirect_stderr(io.StringIO()):
-            with self.assertRaises(SystemExit) as error:
-                cli.main([str(self.root), "--level", "cet4", "--concurrency", "2"])
-        self.assertEqual(error.exception.code, 2)
+    def test_default_cli_runs_concurrently_with_configured_budget(self):
+        source = self.root / "movie.ass"
+        source.write_bytes(ASS.encode("utf-8"))
+        barrier = threading.Barrier(2)
+        clients = []
+
+        def respond(client, messages):
+            clients.append(client)
+            barrier.wait(timeout=3)
+            payload = json.loads(messages[-1]["content"])
+            return json.dumps({"items": [{"id": i, "notes": []} for i in payload["target_ids"]]})
+
+        with patch.object(ModelClient, "_request", autospec=True, side_effect=respond):
+            status, _, error = self.run_cli([str(source), "--level", "cet4", "--batch-size", "1"])
+        self.assertEqual(status, 0, error)
+        self.assertEqual(len(clients), 2)
+        self.assertEqual(clients[0].workers, 4)
+        self.assertEqual(clients[0].limiter.rpm, 48)
+        self.assertEqual(clients[0].limiter.tpm, 4_000_000)
+        self.assertEqual(clients[0].limiter.qps, 0.8)
+        self.assertTrue((self.root / "movie.cet4.subpeeko.ass").exists())
+
+    def test_individual_concurrency_and_quota_options_can_be_overridden(self):
+        args = cli.parser().parse_args(["movie.ass", "--level", "cet4", "--concurrency", "1", "--tpm", "100000"])
+        self.assertEqual((args.concurrency, args.rpm, args.tpm), (1, 60, 100_000))
 
     def test_recursive_batch_continues_after_a_bad_file(self):
         first = self.root / "one.ass"
