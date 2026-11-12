@@ -13,3 +13,10 @@
   Do not print credentials or subtitle contents in routine logs.
 - Check the provenance and license of third-party vocabulary data before
   bundling it. Keep changes focused and test behavior that matters.
+- Keep `README.md` limited to shipped user-facing behavior. Put experiments,
+  benchmark results, and model-selection rationale in
+  `docs/agent-evaluation.md` or local ignored reports. Do not describe an
+  unimplemented model or workflow as a current feature.
+- Before adding a local pre-filter that skips model calls, follow the
+  evaluation protocol in `docs/agent-evaluation.md` and record human-annotated
+  recall against an all-model baseline.

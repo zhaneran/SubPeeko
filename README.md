@@ -124,21 +124,13 @@ results. In particular, `--overwrite` can reuse an existing checkpoint unless
 `%LOCALAPPDATA%\subpeeko\checkpoints` on Windows and
 `${XDG_CACHE_HOME:-~/.cache}/subpeeko/checkpoints` on Linux.
 
-Alibaba Cloud's `decision-model-preview` uses the separate
-[System One API](https://help.aliyun.com/zh/model-studio/decision-model-api)
-and does not generate text, so it cannot replace the Chat Completions model
-needed to produce Chinese explanations. Its use as a pre-filter requires an
-accuracy evaluation before any dialogue can be skipped.
-
-## How it works and current limits
+## How it works
 
 Each identified bilingual dialogue is sent to the configured model, along with
 the original Chinese and nearby dialogue as context. Word-list hints are
 computed locally, and dialogues are grouped into batches to reduce the number
-of requests. Local rules do not skip dialogue based on its apparent difficulty:
-that optimization needs comparison with human annotations and an all-model
-baseline first. The model can still miss a language point or misjudge its level
-or meaning; review the output before relying on it for learning.
+of requests. The model returns concise Chinese explanations for language points
+above the selected level.
 
 SubPeeko preserves original event timing, English text, styles, metadata, and
 other events. It processes confidently identified bilingual dialogue whose
