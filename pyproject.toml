@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "subpeeko"
+version = "0.1.0"
+description = "Create level-aware English-learning subtitles from bilingual ASS files"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md", "src/subpeeko/data/LICENSE-KyleBing.txt"]
+requires-python = ">=3.10"
+dependencies = ["keyring>=24", "python-dotenv>=1"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+
+[project.urls]
+Homepage = "https://github.com/zhaneran/SubPeeko"
+Repository = "https://github.com/zhaneran/SubPeeko"
+Issues = "https://github.com/zhaneran/SubPeeko/issues"
+Releases = "https://github.com/zhaneran/SubPeeko/releases"
+
+[project.scripts]
+subpeeko = "subpeeko.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+subpeeko = ["data/*.json", "data/*.txt"]
