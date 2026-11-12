@@ -2,6 +2,12 @@
 
 [中文文档](README.zh-CN.md)
 
+<p>
+<a href="https://github.com/zhaneran/SubPeeko/actions/workflows/tests.yml?query=branch%3Amain"><img src="https://github.com/zhaneran/SubPeeko/actions/workflows/tests.yml/badge.svg?branch=main" alt="Build status"></a>
+<a href="https://github.com/zhaneran/SubPeeko/releases"><img src="https://img.shields.io/github/v/release/zhaneran/SubPeeko?display_name=tag" alt="Latest release"></a>
+<a href="LICENSE"><img src="https://img.shields.io/github/license/zhaneran/SubPeeko" alt="License"></a>
+</p>
+
 SubPeeko creates English-learning subtitles from bilingual English–Chinese ASS
 files. It retains the original English and replaces the dialogue's Chinese
 translation with concise annotations for language points above the selected
