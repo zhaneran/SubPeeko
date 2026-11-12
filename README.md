@@ -67,8 +67,14 @@ writing files. In a batch, errors are reported per file and remaining inputs are
 still processed; a nonzero exit status indicates a failure.
 Model requests contain up to five target dialogues by default; use
 `--batch-size` to choose a value from 1 to 100 for a provider that supports
-larger or smaller requests. Timed-out or malformed batches are split and
-retried automatically.
+larger or smaller requests. A timed-out, truncated, or malformed batch is split
+and retried without permanently reducing the size of later batches.
+
+Requests send `enable_thinking: false` by default for every OpenAI-compatible
+endpoint. Use `--thinking on` to enable it, or `--thinking auto` to omit the
+parameter and use the provider's default. `enable_thinking` is a provider
+extension, not a standard OpenAI field: if a provider rejects it, use
+`--thinking auto`. Some models cannot disable thinking.
 
 SubPeeko processes up to four batches concurrently by default. The default
 per-process budgets are 60 requests per minute and 5,000,000 input and output
@@ -88,15 +94,35 @@ subpeeko "movie.ass" --level cet4 --concurrency 1  # process batches serially
 configured quotas, spreads requests, and
 reserves estimated input plus output tokens for every request, including
 retries. `--max-output-tokens` controls the output reservation and API output
-limit when rate limiting is enabled (default: 2048). Oversized batches may be
-split after a failed response. A 429 response pauses subsequent requests before
-one retry, using a numeric `Retry-After` when supplied.
+limit when rate limiting is enabled (default: 2048). For Alibaba Qwen3.8
+Flash and Max the limit includes both reasoning and the final answer. For
+other models or providers in thinking or auto mode, an additional estimated 8192 tokens
+are reserved by default; adjust with `--reasoning-reserve` to match the model.
+This reservation is not a hard limit on those providers' reasoning. A 429
+response pauses subsequent requests before one retry, using a numeric
+`Retry-After` when supplied.
 
 Token reservation uses request UTF-8 bytes plus a fixed allowance rather than
 the provider's tokenizer. This is a conservative estimate, not a guarantee:
 providers may use different accounting or burst rules, and account quotas may
 be shared with other processes. Allocate only this process's available share and
 monitor the provider's actual usage.
+
+SubPeeko reports each request's target count, network time, local rate-limit
+wait, status, and input/output/reasoning Token usage when supplied by the
+provider. A final summary includes total elapsed time and retry/split events.
+No subtitle text or API keys are printed in these diagnostics.
+
+Completed model batches are saved to an automatic local checkpoint, so rerun
+the same command after an interruption to resume. Checkpoints are isolated by
+file contents and path, level, model, credentials, prompt, vocabulary and
+relevant settings. They contain English spans and Chinese annotations, but
+not the API key or full original subtitle. They remain on disk after success;
+use `--no-resume` to avoid reading and writing checkpoints and request fresh
+results. In particular, `--overwrite` can reuse an existing checkpoint unless
+`--no-resume` is also supplied. Checkpoints live in
+`%LOCALAPPDATA%\subpeeko\checkpoints` on Windows and
+`${XDG_CACHE_HOME:-~/.cache}/subpeeko/checkpoints` on Linux.
 
 Alibaba Cloud's `decision-model-preview` uses the separate
 [System One API](https://help.aliyun.com/zh/model-studio/decision-model-api)

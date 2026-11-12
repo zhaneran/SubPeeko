@@ -15,10 +15,12 @@ class RateLimiter:
         self.next_request = 0.0
         self.lock = Lock()
 
-    def acquire(self, tokens: int):
+    def acquire(self, tokens: int, cancelled=None):
         if tokens > self.tpm:
             raise ValueError("Estimated tokens for one request exceed the configured TPM budget")
         while True:
+            if cancelled and cancelled.is_set():
+                raise InterruptedError("Processing was interrupted")
             with self.lock:
                 now = monotonic()
                 while self.events and self.events[0][0] <= now - 60:
@@ -38,7 +40,10 @@ class RateLimiter:
                     self.events.append(ticket)
                     self.next_request = now + max(1 / self.qps, 60 / self.rpm, 60 * tokens / self.tpm)
                     return ticket
-            sleep(delay)
+            if cancelled:
+                cancelled.wait(delay)
+            else:
+                sleep(delay)
 
     def adjust(self, ticket, used: int) -> None:
         with self.lock:

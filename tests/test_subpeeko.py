@@ -3,6 +3,7 @@ import io
 import json
 import os
 import subprocess
+import sys
 import sysconfig
 import tempfile
 import threading
@@ -13,6 +14,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from subpeeko import cli, config
+from subpeeko.checkpoint import checkpoint_key
 from subpeeko.config import Config
 from subpeeko.model import ModelClient, ModelError
 from subpeeko.rate_limit import RateLimiter
@@ -183,6 +185,117 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(sizes, [6, 3, 1, 2, 3, 1, 2])
         self.assertEqual(len(retries), 3)
 
+    def test_failed_batch_does_not_shrink_later_batches(self):
+        client = ModelClient(Config("https://example.test/v1", "model", "secret"), batch_size=5, workers=1)
+        records = [dialogue(i, f"Sentence {i}", f"中文{i}") for i in range(1, 12)]
+        sizes = []
+
+        def respond(messages):
+            ids = json.loads(messages[-1]["content"])["target_ids"]
+            sizes.append(len(ids))
+            if len(sizes) == 1:
+                raise ModelError("timeout", split_batch=True)
+            return json.dumps({"items": [{"id": i, "notes": []} for i in ids]})
+
+        with patch.object(client, "_request", side_effect=respond):
+            result = client.analyze(records, "cet4")
+        self.assertEqual(set(result), set(range(1, 12)))
+        self.assertEqual(sizes, [5, 2, 3, 5, 1])
+
+    def test_request_disables_thinking_and_reserves_combined_tokens(self):
+        requests, events = [], []
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def read(self, limit):
+                return json.dumps({"choices": [{"message": {"content": "OK"}, "finish_reason": "stop"}],
+                                   "usage": {"prompt_tokens": 100, "completion_tokens": 30, "total_tokens": 130,
+                                             "completion_tokens_details": {"reasoning_tokens": 20}}}).encode()
+
+        class Opener:
+            def open(self, request, timeout):
+                requests.append(json.loads(request.data))
+                return Response()
+
+        configs = [Config("https://example.test/v1", "generic", "secret"),
+                   Config("https://example.cn-beijing.maas.aliyuncs.com/v1", "qwen3.8-flash", "secret")]
+        with patch("subpeeko.model.build_opener", return_value=Opener()):
+            for config_item in configs:
+                client = ModelClient(config_item, on_request=events.append)
+                self.assertEqual(client._request([{"role": "user", "content": "synthetic"}]), "OK")
+        self.assertFalse(requests[0]["enable_thinking"])
+        self.assertFalse(requests[1]["enable_thinking"])
+        self.assertEqual(requests[0]["max_tokens"], 2048)
+        self.assertEqual(requests[1]["max_completion_tokens"], 2048)
+        self.assertEqual(events[1]["usage"]["reasoning_tokens"], 20)
+        self.assertNotIn("secret", repr(events))
+
+    def test_thinking_can_be_enabled_or_left_to_provider(self):
+        bodies = []
+
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *args): pass
+            def read(self, limit):
+                return b'{"choices":[{"message":{"content":"OK"}}]}'
+
+        class Opener:
+            def open(self, request, timeout):
+                bodies.append(json.loads(request.data))
+                return Response()
+
+        with patch("subpeeko.model.build_opener", return_value=Opener()):
+            for thinking in ("on", "auto"):
+                client = ModelClient(Config("https://example.test/v1", "generic", "secret"), thinking=thinking)
+                client._request([{"role": "user", "content": "synthetic"}])
+        self.assertTrue(bodies[0]["enable_thinking"])
+        self.assertNotIn("enable_thinking", bodies[1])
+
+    def test_tpm_reservation_accounts_for_reasoning(self):
+        requests = []
+
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *args): pass
+            def read(self, limit):
+                return b'{"choices":[{"message":{"content":"OK"}}]}'
+
+        class Opener:
+            def open(self, request, timeout):
+                requests.append(request.data)
+                return Response()
+
+        configs = [Config("https://example.test/v1", "generic", "secret"),
+                   Config("https://example.cn-beijing.maas.aliyuncs.com/v1", "qwen3.8-flash", "secret")]
+        with patch("subpeeko.model.build_opener", return_value=Opener()):
+            for config_item in configs:
+                client = ModelClient(config_item, thinking="on")
+                with patch.object(client.limiter, "acquire", return_value=[0, 0]) as reserve:
+                    client._request([{"role": "user", "content": "synthetic"}])
+                    extra = 8192 if config_item.model_name == "generic" else 0
+                    self.assertEqual(reserve.call_args.args[0], len(requests[-1]) + 2048 + extra + 528)
+
+    def test_truncated_response_is_not_accepted(self):
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *args): pass
+            def read(self, limit):
+                return b'{"choices":[{"message":{"content":"{}"},"finish_reason":"length"}]}'
+
+        class Opener:
+            def open(self, request, timeout): return Response()
+
+        client = ModelClient(Config("https://example.test/v1", "generic", "secret"))
+        with patch("subpeeko.model.build_opener", return_value=Opener()):
+            with self.assertRaises(ModelError) as error:
+                client._request([{"role": "user", "content": "synthetic"}])
+        self.assertTrue(error.exception.split_batch)
+
     def test_concurrent_batches_preserve_all_targets(self):
         client = ModelClient(Config("http://127.0.0.1/v1", "test", "secret"), batch_size=1, workers=3)
         records = [dialogue(i, f"Sentence {i}", f"中文{i}") for i in range(1, 7)]
@@ -218,6 +331,29 @@ class ModelTests(unittest.TestCase):
 
 
 class RateLimitTests(unittest.TestCase):
+    def test_cancelled_wait_does_not_start_another_request(self):
+        limiter = RateLimiter(rpm=1, tpm=10000)
+        limiter.acquire(100)
+        stopped = threading.Event()
+        finished = threading.Event()
+        errors = []
+
+        def wait_for_permit():
+            try:
+                limiter.acquire(100, stopped)
+            except InterruptedError as exc:
+                errors.append(exc)
+            finally:
+                finished.set()
+
+        thread = threading.Thread(target=wait_for_permit)
+        thread.start()
+        stopped.set()
+        self.assertTrue(finished.wait(1))
+        thread.join()
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(len(limiter.events), 1)
+
     def test_smooths_requests_and_respects_rolling_token_reservations(self):
         clock = [0.0]
 
@@ -236,6 +372,25 @@ class RateLimitTests(unittest.TestCase):
             self.assertGreaterEqual(clock[0], 65)
             with self.assertRaises(ValueError):
                 limiter.acquire(801)
+
+
+class CheckpointTests(unittest.TestCase):
+    def test_key_changes_when_input_or_model_settings_change(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "movie.ass"
+            path.write_bytes(ASS.encode("utf-8"))
+            source_hash = AssFile.read(path).source_hash
+            base = Config("https://example.test/v1", "model", "secret")
+
+            def key(config_item=base, level="cet4", thinking="off", digest=source_hash):
+                return checkpoint_key(path, digest, config_item, level, batch_size=5,
+                                      thinking=thinking, max_output_tokens=2048)
+
+            self.assertNotEqual(key(), key(level="cet6"))
+            self.assertNotEqual(key(), key(thinking="on"))
+            self.assertNotEqual(key(), key(config_item=Config(base.base_url, "another", "secret")))
+            self.assertNotEqual(key(), key(config_item=Config(base.base_url, "model", "another-key")))
+            self.assertNotEqual(key(), key(digest=b"different content"))
 
 
 class ConfigTests(unittest.TestCase):
@@ -274,6 +429,9 @@ class MockHandler(BaseHTTPRequestHandler):
     invalid = False
     redirect = False
     redirected_requests = 0
+    pause_target = None
+    pause_started = None
+    pause_release = None
 
     def do_POST(self):
         if type(self).redirect:
@@ -285,6 +443,9 @@ class MockHandler(BaseHTTPRequestHandler):
         type(self).max_tokens.append(request.get("max_tokens"))
         payload = json.loads(request["messages"][-1]["content"])
         type(self).calls.append((self.path, payload))
+        if type(self).pause_target in payload["target_ids"]:
+            type(self).pause_started.set()
+            type(self).pause_release.wait(timeout=15)
         if type(self).invalid:
             content = '{"items": []}'
         else:
@@ -297,11 +458,14 @@ class MockHandler(BaseHTTPRequestHandler):
                 items.append({"id": identifier, "notes": notes})
             content = json.dumps({"items": items}, ensure_ascii=False)
         body = json.dumps({"choices": [{"message": {"content": content}}]}).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def do_GET(self):
         type(self).redirected_requests += 1
@@ -331,9 +495,15 @@ class CliIntegrationTests(unittest.TestCase):
         MockHandler.invalid = False
         MockHandler.redirect = False
         MockHandler.redirected_requests = 0
+        MockHandler.pause_target = None
+        MockHandler.pause_started = None
+        MockHandler.pause_release = None
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        cache = patch("subpeeko.checkpoint.cache_dir", return_value=self.root / ".checkpoints")
+        cache.start()
+        self.addCleanup(cache.stop)
         self.env = {
             "SUBPEEKO_BASE_URL": f"http://127.0.0.1:{self.server.server_port}/v1",
             "SUBPEEKO_MODEL_NAME": "mock-model",
@@ -435,6 +605,74 @@ class CliIntegrationTests(unittest.TestCase):
     def test_individual_concurrency_and_quota_options_can_be_overridden(self):
         args = cli.parser().parse_args(["movie.ass", "--level", "cet4", "--concurrency", "1", "--tpm", "100000"])
         self.assertEqual((args.concurrency, args.rpm, args.tpm), (1, 60, 100_000))
+
+    def test_interrupted_run_resumes_only_completed_dialogues(self):
+        source = self.root / "movie.ass"
+        source.write_bytes(ASS.encode("utf-8"))
+        arguments = [str(source), "--level", "highschool", "--batch-size", "1", "--concurrency", "1"]
+        sent = []
+
+        def interrupted(client, messages):
+            identifier = json.loads(messages[-1]["content"])["target_ids"][0]
+            sent.append(identifier)
+            if identifier == 2:
+                raise KeyboardInterrupt()
+            return json.dumps({"items": [{"id": identifier, "notes": []}]})
+
+        with patch.object(ModelClient, "_request", autospec=True, side_effect=interrupted):
+            status, _, _ = self.run_cli(arguments)
+        self.assertEqual(status, 130)
+        self.assertEqual(sent, [1, 2])
+        self.assertFalse((self.root / "movie.highschool.subpeeko.ass").exists())
+
+        sent.clear()
+        def resume(client, messages):
+            identifier = json.loads(messages[-1]["content"])["target_ids"][0]
+            sent.append(identifier)
+            return json.dumps({"items": [{"id": identifier, "notes": []}]})
+
+        changed_concurrency = arguments[:-1] + ["2"]
+        with patch.object(ModelClient, "_request", autospec=True, side_effect=resume):
+            status, output, error = self.run_cli(changed_concurrency)
+        self.assertEqual(status, 0, error)
+        self.assertEqual(sent, [2])
+        self.assertIn("Resuming: 1/2", output)
+        self.assertTrue((self.root / "movie.highschool.subpeeko.ass").exists())
+        self.assertEqual(source.read_bytes(), ASS.encode("utf-8"))
+        for database in (self.root / ".checkpoints").glob("*.sqlite3"):
+            self.assertNotIn(b"mock-secret", database.read_bytes())
+
+        sent.clear()
+        with patch.object(ModelClient, "_request", autospec=True, side_effect=resume):
+            status, _, error = self.run_cli(arguments + ["--overwrite", "--no-resume"])
+        self.assertEqual(status, 0, error)
+        self.assertEqual(sent, [1, 2])
+
+    def test_resume_survives_process_termination(self):
+        source = self.root / "movie.ass"
+        source.write_bytes(ASS.encode("utf-8"))
+        env = {**os.environ, **self.env, "LOCALAPPDATA": str(self.root), "XDG_CACHE_HOME": str(self.root)}
+        command = [sys.executable, "-m", "subpeeko", str(source), "--level", "highschool", "--batch-size", "1",
+                   "--concurrency", "1", "--rpm", "6000", "--tpm", "600000", "--qps", "100"]
+        MockHandler.pause_target = 2
+        MockHandler.pause_started = threading.Event()
+        MockHandler.pause_release = threading.Event()
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+        try:
+            self.assertTrue(MockHandler.pause_started.wait(timeout=15), "Second request did not start")
+        finally:
+            process.kill()
+            process.communicate(timeout=10)
+            MockHandler.pause_release.set()
+            MockHandler.pause_target = None
+        self.assertFalse((self.root / "movie.highschool.subpeeko.ass").exists())
+        resumed = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=20)
+        self.assertEqual(resumed.returncode, 0, resumed.stderr)
+        self.assertIn("Resuming: 1/2", resumed.stdout)
+        targets = [item for _, payload in MockHandler.calls for item in payload["target_ids"]]
+        self.assertEqual(targets.count(1), 1)
+        self.assertGreaterEqual(targets.count(2), 2)
+        self.assertEqual(source.read_bytes(), ASS.encode("utf-8"))
 
     def test_recursive_batch_continues_after_a_bad_file(self):
         first = self.root / "one.ass"

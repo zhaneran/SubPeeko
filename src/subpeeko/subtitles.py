@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import codecs
+import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -111,6 +112,7 @@ def _replace_visible(segment: str, annotation: str) -> str:
 
 class AssFile:
     def __init__(self, data: bytes):
+        self.source_hash = hashlib.sha256(data).digest()
         text, self.encoding = _decode(data)
         self.lines = text.splitlines(keepends=True)
         self.dialogues: list[Dialogue] = []

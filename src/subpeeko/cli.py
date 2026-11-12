@@ -7,9 +7,11 @@ import math
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from . import __version__
+from .checkpoint import Checkpoint, CheckpointError, checkpoint_key
 from .config import ConfigError, configure, load_config, show_config
 from .model import BATCH_SIZE, DEFAULT_CONCURRENCY, DEFAULT_RPM, DEFAULT_TPM, ModelClient, ModelError
 from .subtitles import AssFile, SubtitleError
@@ -48,6 +50,16 @@ def _positive_float(value: str) -> float:
     raise argparse.ArgumentTypeError("must be a positive finite number")
 
 
+def _nonnegative_int(value: str) -> int:
+    try:
+        number = int(value)
+        if number >= 0:
+            return number
+    except ValueError:
+        pass
+    raise argparse.ArgumentTypeError("must be a nonnegative integer")
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(
         prog="subpeeko",
@@ -65,6 +77,9 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--tpm", type=_positive_int, default=DEFAULT_TPM, help=f"available input and output tokens per minute (default: {DEFAULT_TPM})")
     result.add_argument("--qps", type=_positive_float, help="maximum requests per second; defaults to RPM / 60")
     result.add_argument("--max-output-tokens", type=_positive_int, default=2048, help="output token reservation when rate limiting (default: 2048)")
+    result.add_argument("--thinking", choices=("off", "on", "auto"), default="off", help="model thinking mode (default: off; auto omits the provider-specific setting)")
+    result.add_argument("--reasoning-reserve", type=_nonnegative_int, default=8192, help="additional reasoning-token reservation for providers without a combined cap (default: 8192)")
+    result.add_argument("--no-resume", action="store_true", help="do not read or write local checkpoints")
     result.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return result
 
@@ -136,7 +151,39 @@ def _write_output(path: Path, data: bytes, overwrite: bool) -> None:
             temporary.unlink(missing_ok=True)
 
 
+def _report_request(event: dict) -> None:
+    usage = event["usage"] or {}
+    def count(name):
+        value = usage.get(name)
+        return str(value) if type(value) is int and value >= 0 else "?"
+    print(
+        f"  Request {event['id']}: targets={event['targets']}, status={event['status']}, "
+        f"network={event['request_seconds']:.2f}s, wait={event['wait_seconds']:.2f}s, "
+        f"tokens in/out/reasoning={count('prompt_tokens')}/{count('completion_tokens')}/{count('reasoning_tokens')}",
+        flush=True,
+    )
+
+
 def _convert(args: argparse.Namespace) -> int:
+    clients = []
+    started = time.monotonic()
+    try:
+        return _convert_files(args, clients)
+    finally:
+        if clients:
+            client = clients[0]
+            def total(key):
+                count = client.usage_counts[key]
+                if not count:
+                    return "?"
+                value = str(client.usage[key])
+                return value if count == client.usage_responses else f"{value} (partial {count}/{client.usage_responses})"
+            print(f"Elapsed: {time.monotonic() - started:.2f}s. Usage: input={total('prompt_tokens')}, output={total('completion_tokens')}, "
+                  f"reasoning={total('reasoning_tokens')}; usage reported for {client.usage_responses}/{client.requests} requests; "
+                  f"{client.retries} retry/split event(s).")
+
+
+def _convert_files(args: argparse.Namespace, clients: list[ModelClient]) -> int:
     paths = input_files(args.input, args.recursive)
     if not paths:
         print("No input ASS files found.")
@@ -151,6 +198,7 @@ def _convert(args: argparse.Namespace) -> int:
     succeeded = failed = 0
     for path in paths:
         output = output_path(path, args.level)
+        checkpoint = None
         try:
             if output.exists() and not args.overwrite:
                 raise SubtitleError(f"Output already exists: {output} (use --overwrite to replace it)")
@@ -161,12 +209,24 @@ def _convert(args: argparse.Namespace) -> int:
                 client = ModelClient(
                     load_config(), batch_size=args.batch_size, workers=args.concurrency,
                     rpm=args.rpm, tpm=args.tpm, qps=args.qps, max_output_tokens=args.max_output_tokens,
+                    thinking=args.thinking, reasoning_reserve=args.reasoning_reserve, on_request=_report_request,
                 )
+                clients.append(client)
+            cached = {}
+            if not args.no_resume:
+                key = checkpoint_key(path, subtitles.source_hash, client.config, args.level,
+                                     batch_size=args.batch_size, thinking=client.thinking,
+                                     max_output_tokens=args.max_output_tokens)
+                checkpoint = Checkpoint(key)
+                cached = checkpoint.load({item.id for item in subtitles.dialogues})
+                if cached:
+                    print(f"Resuming: {len(cached)}/{len(subtitles.dialogues)} dialogue(s) from local checkpoint.")
             print(f"Processing: {path} ({len(subtitles.dialogues)} bilingual dialogue(s))", flush=True)
             notes = client.analyze(
                 subtitles.dialogues, args.level,
                 progress=lambda done, total: print(f"  Reviewed {done}/{total} dialogue(s).", flush=True),
                 on_retry=lambda message: print(f"  {message}", file=sys.stderr, flush=True),
+                initial_results=cached, on_batch=checkpoint.save if checkpoint else None,
             )
             result = subtitles.render(notes)
             _write_output(output, result, args.overwrite)
@@ -174,9 +234,12 @@ def _convert(args: argparse.Namespace) -> int:
             print(f"Created: {output} ({len(subtitles.dialogues)} bilingual dialogue(s))")
             if any(len(note) > 90 for note in notes.values()):
                 print("  Some annotations may be too long for the available display time.")
-        except (ConfigError, ModelError, SubtitleError) as exc:
+        except (CheckpointError, ConfigError, ModelError, SubtitleError) as exc:
             failed += 1
             print(f"Failed: {path}: {exc}", file=sys.stderr)
+        finally:
+            if checkpoint is not None:
+                checkpoint.close()
     print(f"Finished: {succeeded} created, {failed} failed; {client.requests if client else 0} model request(s).")
     return 1 if failed else 0
 
@@ -195,7 +258,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.concurrency > 32:
             p.error("--concurrency must not exceed 32")
         return _convert(args)
-    except (ConfigError, ModelError, SubtitleError) as exc:
+    except (CheckpointError, ConfigError, ModelError, SubtitleError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
     except (KeyboardInterrupt, EOFError):
