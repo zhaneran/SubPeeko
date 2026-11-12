@@ -1,11 +1,14 @@
 # SubPeeko
 
+[中文文档](README.zh-CN.md)
+
 SubPeeko creates English-learning subtitles from bilingual English–Chinese ASS
 files. It retains the original English and replaces the dialogue's Chinese
 translation with concise annotations for language points above the selected
 learning level.
 
-This is an initial local release. It has not been published to PyPI.
+The current package version is `0.1.0`. See [RELEASES.md](RELEASES.md) for the
+release record and [BUILD.md](BUILD.md) for build and publishing instructions.
 
 ## Install
 
@@ -16,8 +19,8 @@ python -m pip install .
 ```
 
 When using a virtual environment, activate it first so that the `subpeeko`
-command is available. A future public release is intended to support
-`pip install subpeeko`.
+command is available. After publication, the package can be installed with
+`python -m pip install subpeeko`.
 
 ## Configure the model
 
@@ -160,6 +163,24 @@ new revision and, when available, builds an updated list into the package. It
 checks the upstream license and validates the downloaded lists first. If the
 check fails, the build warns and uses the bundled snapshot. The source checkout
 is not modified, and installed SubPeeko does not fetch vocabulary at runtime.
+
+## Release, build, and license
+
+The source code is released under the [MIT License](LICENSE). The bundled
+vocabulary data is third-party material with its own license and provenance
+notice in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Build and validate the wheel and source distribution with:
+
+```bash
+python -m pip install --upgrade build twine
+python -m build
+python -m twine check dist/*
+```
+
+See [RELEASES.md](RELEASES.md) for version history and the release checklist.
+See [BUILD.md](BUILD.md) for package inspection, wheel testing, and publishing
+steps.
 
 ## Development
 

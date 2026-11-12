@@ -2,5 +2,9 @@ prune sample
 exclude .env
 exclude .env.*
 global-exclude .env .env.* *.[aA][sS][sS]
+include LICENSE
+include README.zh-CN.md
+include RELEASES.md
+include BUILD.md
 include THIRD_PARTY_NOTICES.md
 include vocabulary_build.py
