@@ -334,7 +334,14 @@ class RateLimitTests(unittest.TestCase):
     def test_cancelled_wait_does_not_start_another_request(self):
         limiter = RateLimiter(rpm=1, tpm=10000)
         limiter.acquire(100)
-        stopped = threading.Event()
+        waiting = threading.Event()
+
+        class ObservableEvent(threading.Event):
+            def wait(self, timeout=None):
+                waiting.set()
+                return super().wait(timeout)
+
+        stopped = ObservableEvent()
         finished = threading.Event()
         errors = []
 
@@ -348,7 +355,10 @@ class RateLimitTests(unittest.TestCase):
 
         thread = threading.Thread(target=wait_for_permit)
         thread.start()
-        stopped.set()
+        try:
+            self.assertTrue(waiting.wait(1))
+        finally:
+            stopped.set()
         self.assertTrue(finished.wait(1))
         thread.join()
         self.assertEqual(len(errors), 1)
