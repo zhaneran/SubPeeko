@@ -4,8 +4,8 @@
 
 <p>
 <a href="https://github.com/zhaneran/SubPeeko/actions/workflows/tests.yml?query=branch%3Amain"><img src="https://github.com/zhaneran/SubPeeko/actions/workflows/tests.yml/badge.svg?branch=main" alt="构建状态"></a>
-<a href="https://github.com/zhaneran/SubPeeko/releases"><img src="https://img.shields.io/github/v/release/zhaneran/SubPeeko?display_name=tag" alt="最新版本"></a>
-<a href="LICENSE"><img src="https://img.shields.io/github/license/zhaneran/SubPeeko" alt="许可证"></a>
+<a href="https://github.com/zhaneran/SubPeeko/releases"><img src="https://img.shields.io/badge/release-v0.1.0-blue" alt="版本 v0.1.0"></a>
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT 许可证"></a>
 </p>
 
 SubPeeko 可以将双语英中 ASS 字幕转换为英语学习字幕。它保留原始英文，
@@ -67,8 +67,22 @@ subpeeko "./subtitles" --level cet4 --recursive
 使用 `--dry-run` 可以只列出输入和输出路径，不发送模型请求，也不写入文件。批量处理时，单个文件的错误
 会被单独报告，其他文件仍会继续处理。只要有文件失败，命令就会返回非零退出状态。
 
-每个模型请求默认最多包含 5 条目标对白，可以使用 `--batch-size` 设置 1 到 100 的批次大小。超时、
-输出不完整或格式错误的批次会被拆分并重试，后续批次仍使用原来的批次大小。
+### 处理参数
+
+`--batch-size N` 设置每个模型请求包含的目标对白数量，默认值为 5，可设置为 1 到 100。它和
+`--concurrency` 相互独立，后者控制同时执行的请求数量。每个请求还会附带附近对白作为上下文，因此实际
+请求中的对白行数可能多于目标批次大小。
+
+增大批次可以减少请求次数，但会产生更大的请求内容和更大的失败单元。减小批次可以缩小失败影响范围，
+但会增加请求次数。超时、输出不完整或格式错误的批次会被拆分并重试，后续批次仍使用原来的批次大小。
+
+```bash
+subpeeko "movie.ass" --level cet4 --batch-size 20 --concurrency 4
+subpeeko "movie.ass" --level cet4 --batch-size 1 --concurrency 5
+```
+
+第一条命令表示每个请求最多处理 20 条目标对白，同时最多运行 4 个请求。第二条命令表示每个请求处理 1 条
+目标对白，同时最多运行 5 个请求。
 
 所有 OpenAI 兼容接口默认发送 `enable_thinking: false`。使用 `--thinking on` 开启思考，或使用
 `--thinking auto` 省略这个服务商扩展参数并使用服务商默认行为。如果服务商不接受 `enable_thinking`，

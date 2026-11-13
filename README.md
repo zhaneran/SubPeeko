@@ -4,8 +4,8 @@
 
 <p>
 <a href="https://github.com/zhaneran/SubPeeko/actions/workflows/tests.yml?query=branch%3Amain"><img src="https://github.com/zhaneran/SubPeeko/actions/workflows/tests.yml/badge.svg?branch=main" alt="Build status"></a>
-<a href="https://github.com/zhaneran/SubPeeko/releases"><img src="https://img.shields.io/github/v/release/zhaneran/SubPeeko?display_name=tag" alt="Latest release"></a>
-<a href="LICENSE"><img src="https://img.shields.io/github/license/zhaneran/SubPeeko" alt="License"></a>
+<a href="https://github.com/zhaneran/SubPeeko/releases"><img src="https://img.shields.io/badge/release-v0.1.0-blue" alt="Release v0.1.0"></a>
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License"></a>
 </p>
 
 SubPeeko creates English-learning subtitles from bilingual English–Chinese ASS
@@ -74,10 +74,29 @@ when scanning a directory. A directory is scanned without recursion by default.
 Use `--dry-run` to list inputs and destinations without making model requests or
 writing files. In a batch, errors are reported per file and remaining inputs are
 still processed; a nonzero exit status indicates a failure.
-Model requests contain up to five target dialogues by default; use
-`--batch-size` to choose a value from 1 to 100 for a provider that supports
-larger or smaller requests. A timed-out, truncated, or malformed batch is split
-and retried without permanently reducing the size of later batches.
+
+### Processing parameters
+
+`--batch-size N` sets the number of target dialogues included in one model
+request. It defaults to 5 and accepts values from 1 to 100. It is independent
+of `--concurrency`, which controls how many requests may run at the same time.
+Nearby dialogues are also included as context, so the request payload can
+contain more dialogue rows than its target batch size.
+
+Increasing the batch size reduces the number of requests but creates larger
+prompts and larger failure units. Decreasing it makes failures easier to isolate
+but increases the number of requests. A timed-out, truncated, or malformed
+batch is split and retried without permanently reducing the size of later
+batches.
+
+```bash
+subpeeko "movie.ass" --level cet4 --batch-size 20 --concurrency 4
+subpeeko "movie.ass" --level cet4 --batch-size 1 --concurrency 5
+```
+
+The first command sends up to 20 target dialogues per request and runs up to 4
+requests in parallel. The second sends one target dialogue per request and runs
+up to 5 requests in parallel.
 
 Requests send `enable_thinking: false` by default for every OpenAI-compatible
 endpoint. Use `--thinking on` to enable it, or `--thinking auto` to omit the
