@@ -4,8 +4,8 @@
 
 <p>
 <a href="https://github.com/zhaneran/SubPeeko/actions/workflows/tests.yml?query=branch%3Amain"><img src="https://github.com/zhaneran/SubPeeko/actions/workflows/tests.yml/badge.svg?branch=main" alt="Build status"></a>
-<a href="https://github.com/zhaneran/SubPeeko/releases"><img src="https://img.shields.io/badge/release-v0.1.0-blue" alt="Release v0.1.0"></a>
-<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License"></a>
+<a href="https://github.com/zhaneran/SubPeeko/releases"><img src="https://img.shields.io/github/v/release/zhaneran/SubPeeko?display_name=tag" alt="Latest release"></a>
+<a href="LICENSE"><img src="https://img.shields.io/github/license/zhaneran/SubPeeko" alt="License"></a>
 </p>
 
 SubPeeko creates English-learning subtitles from bilingual English–Chinese ASS

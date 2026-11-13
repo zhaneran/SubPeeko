@@ -4,8 +4,8 @@
 
 <p>
 <a href="https://github.com/zhaneran/SubPeeko/actions/workflows/tests.yml?query=branch%3Amain"><img src="https://github.com/zhaneran/SubPeeko/actions/workflows/tests.yml/badge.svg?branch=main" alt="构建状态"></a>
-<a href="https://github.com/zhaneran/SubPeeko/releases"><img src="https://img.shields.io/badge/release-v0.1.0-blue" alt="版本 v0.1.0"></a>
-<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT 许可证"></a>
+<a href="https://github.com/zhaneran/SubPeeko/releases"><img src="https://img.shields.io/github/v/release/zhaneran/SubPeeko?display_name=tag" alt="最新版本"></a>
+<a href="LICENSE"><img src="https://img.shields.io/github/license/zhaneran/SubPeeko" alt="许可证"></a>
 </p>
 
 SubPeeko 可以将双语英中 ASS 字幕转换为英语学习字幕。它保留原始英文，
