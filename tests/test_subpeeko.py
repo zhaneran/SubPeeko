@@ -47,8 +47,48 @@ class SubtitleTests(unittest.TestCase):
         subtitles = AssFile(original)
         self.assertEqual(len(subtitles.dialogues), 2)
         result = subtitles.render({1: "malfunction: 故障", 2: ""})
-        expected = ASS.replace("装置似乎发生故障", "malfunction: 故障").replace("Yes.\\N是的", "Yes.\\N")
+        expected = ASS.replace(
+            r"{\an2}装置似乎发生故障\N{\rEng}The device had a malfunction.",
+            r"{\rEng}The device had a malfunction.\N{\rDefault}{\an2}malfunction: 故障",
+        ).replace(r"Yes.\N是的", r"Yes.\N")
         self.assertEqual(result, b"\xef\xbb\xbf" + expected.encode("utf-8"))
+
+    def test_swaps_font_sizes_only_when_chinese_is_larger(self):
+        source = ASS.replace(
+            "Format: Name, Fontname\r\nStyle: Default,Arial",
+            "Format: Name, Fontname, Fontsize\r\nStyle: Default,Arial,130",
+        ).replace(
+            "[Events]",
+            "Style: Eng,Arial,70\r\n[Events]",
+        )
+        subtitles = AssFile(source.encode("utf-8"))
+        output = subtitles.render({1: "malfunction: 故障", 2: ""}).decode("utf-8")
+        self.assertIn(
+            r"{\rEng}{\fs130}The device had a malfunction.\N{\rDefault}{\an2}{\fs70}malfunction: 故障",
+            output,
+        )
+
+        larger_english = source.replace("Style: Default,Arial,130", "Style: Default,Arial,70")
+        larger_english = larger_english.replace("Style: Eng,Arial,70", "Style: Eng,Arial,130")
+        output = AssFile(larger_english.encode("utf-8")).render({1: "malfunction: 故障", 2: ""}).decode("utf-8")
+        self.assertIn(r"{\rEng}The device had a malfunction.\N{\rDefault}{\an2}malfunction: 故障", output)
+        self.assertNotIn(r"\fs", output)
+
+    def test_english_first_input_stays_english_first(self):
+        source = ASS.replace(
+            r"{\an2}装置似乎发生故障\N{\rEng}The device had a malfunction.",
+            r"{\rEng}The device had a malfunction.\N{\an2}装置似乎发生故障",
+        )
+        output = AssFile(source.encode()).render({1: "malfunction: 故障", 2: ""}).decode()
+        self.assertIn(r"{\rEng}The device had a malfunction.\N{\rDefault}{\an2}malfunction: 故障", output)
+
+    def test_inline_font_sizes_are_used_when_style_sizes_are_missing(self):
+        source = ASS.replace(
+            r"{\an2}装置似乎发生故障\N{\rEng}The device had a malfunction.",
+            r"{\fs130}装置似乎发生故障\N{\fs70}The device had a malfunction.",
+        )
+        output = AssFile(source.encode()).render({1: "malfunction: 故障", 2: ""}).decode()
+        self.assertIn(r"{\fs70}{\fs130}The device had a malfunction.\N{\rDefault}{\fs130}{\fs70}malfunction: 故障", output)
 
     def test_utf16_and_gb18030_round_trip(self):
         for encoding in ("utf-16", "gb18030"):
@@ -75,7 +115,7 @@ class SubtitleTests(unittest.TestCase):
         subtitles = AssFile(source.encode())
         self.assertEqual(subtitles.dialogues[0].english, "The device had a malfunction.")
         output = subtitles.render({1: "malfunction: 故障", 2: ""}).decode()
-        self.assertIn(r"{\b1}malfunction: 故障\N{\rEng}The device\Nhad a malfunction.", output)
+        self.assertIn(r"{\rEng}The device\Nhad a malfunction.\N{\rDefault}{\an2}{\b1}malfunction: 故障", output)
 
     def test_rejects_unsupported_event_format(self):
         source = ASS.replace("MarginV, Effect, Text", "MarginV, Text, Effect")

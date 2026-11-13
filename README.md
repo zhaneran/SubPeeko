@@ -13,7 +13,23 @@ files. It retains the original English and replaces the dialogue's Chinese
 translation with concise annotations for language points above the selected
 learning level.
 
-The current package version is `0.1.0`. See [RELEASES.md](RELEASES.md) for the
+## Example
+
+SubPeeko turns the usual Chinese-over-English layout into an English-first
+learning layout. These representative events illustrate the result:
+
+| Before (Chinese / English) | After (English / notes) |
+| --- | --- |
+| 中文翻译<br>*This appears to be a misunderstanding.* | *This appears to be a misunderstanding.*<br>**misunderstanding: 误会； appears: 似乎** |
+| 他们暂缓了提案<br>*They tabled the proposal.* | *They tabled the proposal.*<br>**tabled: 暂缓（提案）** |
+| 我需要再想想<br>*I need to mull it over.* | *I need to mull it over.*<br>**mull it over: 仔细考虑** |
+
+The generated ASS keeps the original English, puts the model's concise Chinese
+notes underneath it, and swaps the two source font sizes when the source
+Chinese font is larger. Existing timing, other style properties, and unrelated
+events remain in place.
+
+The current package version is `0.2.0`. See [RELEASES.md](RELEASES.md) for the
 release record and [BUILD.md](BUILD.md) for build and publishing instructions.
 
 ## Install
@@ -160,13 +176,16 @@ computed locally, and dialogues are grouped into batches to reduce the number
 of requests. The model returns concise Chinese explanations for language points
 above the selected level.
 
-SubPeeko preserves original event timing, English text, styles, metadata, and
-other events. It processes confidently identified bilingual dialogue whose
-Chinese and English occupy separate contiguous ASS line groups. Single-line
-mixed-language or otherwise ambiguous layouts are kept unchanged. The input
-encoding is preserved for UTF-8, UTF-16 with a byte-order mark, and GB18030.
-If a model response is incomplete or invalid, no result is written for that
-file. Review long annotations for readability during short subtitle events.
+SubPeeko preserves original event timing, English text, other style properties,
+metadata, and unrelated events. It places the English group above the generated
+Chinese notes and, when the source Chinese font is larger, uses local ASS
+overrides to give the English the Chinese size and the notes the English size.
+It processes confidently identified bilingual dialogue whose Chinese and
+English occupy separate contiguous ASS line groups. Single-line mixed-language
+or otherwise ambiguous layouts are kept unchanged. The input encoding is
+preserved for UTF-8, UTF-16 with a byte-order mark, and GB18030. If a model
+response is incomplete or invalid, no result is written for that file. Review
+long annotations for readability during short subtitle events.
 
 The local `sample/` directory is excluded from Git and distribution packages.
 Use subtitles you are allowed to process; their text is sent to your configured
