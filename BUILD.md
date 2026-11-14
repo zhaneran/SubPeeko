@@ -73,7 +73,8 @@ python -m twine upload dist/*
 Pushing a tag such as `v0.2.1` starts `.github/workflows/release.yml`. The
 workflow checks that the tag matches `pyproject.toml`, runs the tests, builds
 and checks both distributions, publishes them to PyPI, and creates a GitHub
-Release with the files attached.
+Release with the files attached. The Release description comes from the
+matching version section in `RELEASES.md`.
 
 Before the first automated release, add a PyPI Trusted Publisher for:
 

@@ -57,10 +57,29 @@ jobs:
       - name: Check distributions
         run: python -m twine check dist/*
 
+      - name: Prepare release notes
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          version = os.environ["RELEASE_TAG"].removeprefix("v")
+          lines = Path("RELEASES.md").read_text(encoding="utf-8").splitlines(keepends=True)
+          heading = f"## {version} "
+          try:
+              start = next(index for index, line in enumerate(lines) if line.startswith(heading))
+          except StopIteration as exc:
+              raise SystemExit(f"RELEASES.md has no section for {version}") from exc
+          end = next((index for index in range(start + 1, len(lines)) if lines[index].startswith("## ")), len(lines))
+          Path("release-notes.md").write_text("".join(lines[start:end]).strip() + "\n", encoding="utf-8")
+          PY
+
       - name: Publish distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" dist/* --verify-tag --title "${GITHUB_REF_NAME}" --generate-notes
+        run: gh release create "${GITHUB_REF_NAME}" dist/* --verify-tag --title "${GITHUB_REF_NAME}" --notes-file release-notes.md
