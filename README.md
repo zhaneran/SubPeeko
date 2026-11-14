@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/subpeeko-logo.png" alt="SubPeeko logo" width="240">
+  <img src="docs/assets/subpeeko-logo.svg" alt="SubPeeko logo" width="240">
 </p>
 
 # SubPeeko
