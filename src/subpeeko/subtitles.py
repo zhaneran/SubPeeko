@@ -14,6 +14,7 @@ CHINESE = re.compile(r"[\u3400-\u9fff]")
 ENGLISH = re.compile(r"[A-Za-z]{2}")
 STYLE_SECTIONS = {"[v4 styles]", "[v4+ styles]", "[v4++ styles]"}
 ASS_COMMAND = re.compile(r"\\r(?P<style>[^\\]*)|\\fs(?P<size>-?\d+(?:\.\d+)?)", re.IGNORECASE)
+ASS_FONT = re.compile(r"\\fn(?P<font>[^\\]*)", re.IGNORECASE)
 
 
 class SubtitleError(Exception):
@@ -130,6 +131,34 @@ def _style_size(styles: dict[str, float], name: str) -> float | None:
     return styles.get(name.strip().casefold())
 
 
+def _effective_style(text: str, event_style: str, styles: dict[str, dict[str, str]]) -> str | None:
+    current = event_style.strip().casefold()
+    if current not in styles:
+        current = None
+    for tag in TAG.finditer(_leading_tags(text)):
+        for command in ASS_COMMAND.finditer(tag.group()[1:-1]):
+            if command.group("size") is None:
+                candidate = command.group("style").strip().casefold() or event_style.strip().casefold()
+                current = candidate if candidate in styles else None
+    return current
+
+
+def _style_font_name(styles: dict[str, dict[str, str]], name: str | None) -> str:
+    return styles.get(name or "", {}).get("fontname", "").strip()
+
+
+def _effective_font_name(text: str, style: str | None, styles: dict[str, dict[str, str]]) -> str:
+    current = _style_font_name(styles, style)
+    for tag in TAG.finditer(_leading_tags(text)):
+        for command in ASS_FONT.finditer(tag.group()[1:-1]):
+            current = command.group("font").strip()
+    return current
+
+
+def _style_display_name(styles: dict[str, dict[str, str]], name: str) -> str:
+    return styles[name].get("name", name)
+
+
 def _effective_font_size(text: str, event_style: str, styles: dict[str, float]) -> float | None:
     """Return the size at the first visible character in an ASS text group."""
     current = _style_size(styles, event_style)
@@ -154,6 +183,23 @@ def _with_font_size(text: str, size: float | None) -> str:
     return f"{prefix}{{\\fs{_format_font_size(size)}}}{text[len(prefix):]}"
 
 
+def _rewrite_style(
+    text: str, target_style: str, font_name: str, styles: dict[str, dict[str, str]]
+) -> str:
+    """Apply a target ASS style while retaining the segment's original font."""
+    prefix = _leading_tags(text)
+    leading = prefix.lstrip(" \t")
+    whitespace = prefix[:len(prefix) - len(leading)]
+    retained = []
+    for tag in TAG.finditer(leading):
+        content = re.sub(r"\\r[^\\]*", "", tag.group()[1:-1], flags=re.IGNORECASE)
+        if content:
+            retained.append("{" + content + "}")
+    safe_font = font_name.replace("\\", "").replace("}", "")
+    reset = f"{{\\r{_style_display_name(styles, target_style)}\\fn{safe_font}}}"
+    return whitespace + reset + "".join(retained) + text[len(prefix):]
+
+
 def _has_style_reset(text: str) -> bool:
     return any(
         command.group("style") is not None
@@ -170,6 +216,7 @@ class AssFile:
         self.lines = text.splitlines(keepends=True)
         self.dialogues: list[Dialogue] = []
         self._layouts: dict[int, _DialogueLayout] = {}
+        self._styles: dict[str, dict[str, str]] = {}
         self._style_sizes: dict[str, float] = {}
         section = ""
         fields: list[str] = []
@@ -194,6 +241,9 @@ class AssFile:
                     values = content[match.end():].split(",", len(style_fields) - 1)
                     if len(values) == len(style_fields):
                         style = dict(zip(style_fields, values))
+                        name = style.get("name", "").strip()
+                        if name:
+                            self._styles[name.casefold()] = {key: value.strip() for key, value in style.items()}
                         try:
                             size = float(style["fontsize"].strip())
                         except (KeyError, ValueError):
@@ -201,7 +251,7 @@ class AssFile:
                         else:
                             if not math.isfinite(size) or size <= 0:
                                 continue
-                            self._style_sizes[style["name"].strip().casefold()] = size
+                            self._style_sizes[name.casefold()] = size
                 continue
             if section != "[events]":
                 continue
@@ -270,16 +320,30 @@ class AssFile:
             content = line.rstrip("\r\n")
             layout = self._layouts[dialogue.id]
             annotation = annotations[dialogue.id]
+            chinese_style = _effective_style(layout.chinese, layout.event_style, self._styles)
+            english_style = _effective_style(layout.english, layout.event_style, self._styles)
+            chinese_font = _effective_font_name(layout.chinese, chinese_style, self._styles)
+            english_font = _effective_font_name(layout.english, english_style, self._styles)
             chinese_size = _effective_font_size(layout.chinese, layout.event_style, self._style_sizes)
             english_size = _effective_font_size(layout.english, layout.event_style, self._style_sizes)
             swap_size = chinese_size is not None and english_size is not None and chinese_size > english_size
-            english = _with_font_size(layout.english, chinese_size if swap_size else None)
             translated = _replace_visible(layout.chinese, annotation)
-            if annotation.strip() and TAG.search(layout.english) and not _has_style_reset(layout.chinese):
-                if layout.event_style:
-                    # Reset the base style so English-only overrides do not leak into the notes.
-                    translated = f"{{\\r{layout.event_style}}}" + translated
-            translated = _with_font_size(translated, english_size if swap_size else None)
-            replacement = english + layout.separator + translated
+            swap_style = (
+                chinese_style is not None and english_style is not None
+                and chinese_style != english_style and chinese_font and english_font
+            )
+            if swap_style:
+                english = _rewrite_style(layout.english, chinese_style, english_font, self._styles)
+                translated = _rewrite_style(translated, english_style, chinese_font, self._styles)
+                english = _with_font_size(english, chinese_size if swap_size else english_size)
+                translated = _with_font_size(translated, english_size if swap_size else chinese_size)
+            else:
+                english = _with_font_size(layout.english, chinese_size if swap_size else None)
+                if annotation.strip() and TAG.search(layout.english) and not _has_style_reset(layout.chinese):
+                    if layout.event_style:
+                        # Reset the base style so English-only overrides do not leak into the notes.
+                        translated = f"{{\\r{layout.event_style}}}" + translated
+                translated = _with_font_size(translated, english_size if swap_size else None)
+            replacement = english if not annotation.strip() else english + layout.separator + translated
             lines[dialogue.line_index] = line[:dialogue.text_start] + replacement + line[len(content):]
         return _encode("".join(lines), self.encoding)

@@ -1,5 +1,36 @@
 # Releases
 
+## 0.2.2 — 2026-11-14
+
+Status: prepared for publication.
+
+This release fixes generated ASS layout and empty annotation rendering.
+
+### Included
+
+- Swap all available ASS style attributes between the English and Chinese
+  lines while preserving each line's original font name.
+- Remove empty trailing line breaks when no annotation is generated, improving
+  compatibility with subtitle players.
+- Preserve all source dialogue events and add regression coverage for full style
+  swapping and empty annotations.
+
+### Package files
+
+The build produces the following artifacts in `dist/`.
+
+- `subpeeko-0.2.2-py3-none-any.whl`
+- `subpeeko-0.2.2.tar.gz`
+
+### Release checklist
+
+1. Run the test suite and build validation described in [BUILD.md](BUILD.md).
+2. Inspect both artifacts with `twine check dist/*`.
+3. Confirm that `sample/`, `.env`, API keys, and ASS files are absent from the
+   artifacts.
+4. Create the Git tag `v0.2.2` after the release commit is approved.
+5. Let `.github/workflows/release.yml` publish the tag.
+
 ## 0.2.1 — 2026-11-14
 
 Status: prepared for publication.
