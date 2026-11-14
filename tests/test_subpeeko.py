@@ -623,7 +623,7 @@ class CliIntegrationTests(unittest.TestCase):
         self.assertEqual(source.read_bytes(), original)
         generated = target.read_bytes().decode("utf-8-sig")
         self.assertIn("malfunction: 故障", generated)
-        self.assertIn(r"{\rEng}The device had a malfunction.", generated)
+        self.assertIn(r"{\rEng}The device had a malfunction (故障).", generated)
         self.assertIn("[Aegisub Extradata]", generated)
         self.assertEqual(MockHandler.calls[0][0], "/v1/chat/completions")
         self.assertEqual(len(MockHandler.calls[0][1]["target_ids"]), 2)
