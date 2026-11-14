@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/subpeeko-logo.png" alt="SubPeeko logo" width="240">
+</p>
+
 # SubPeeko
 
 [中文文档](README.zh-CN.md)
