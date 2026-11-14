@@ -50,7 +50,7 @@ class SubtitleTests(unittest.TestCase):
         expected = ASS.replace(
             r"{\an2}装置似乎发生故障\N{\rEng}The device had a malfunction.",
             r"{\rEng}The device had a malfunction.\N{\rDefault}{\an2}malfunction: 故障",
-        ).replace(r"Yes.\N是的", r"Yes.\N")
+        ).replace(r"Yes.\N是的", r"Yes.")
         self.assertEqual(result, b"\xef\xbb\xbf" + expected.encode("utf-8"))
 
     def test_swaps_font_sizes_only_when_chinese_is_larger(self):
@@ -64,15 +64,29 @@ class SubtitleTests(unittest.TestCase):
         subtitles = AssFile(source.encode("utf-8"))
         output = subtitles.render({1: "malfunction: 故障", 2: ""}).decode("utf-8")
         self.assertIn(
-            r"{\rEng}{\fs130}The device had a malfunction.\N{\rDefault}{\an2}{\fs70}malfunction: 故障",
+            r"{\rDefault\fnArial}{\fs130}The device had a malfunction.\N{\rEng\fnArial}{\an2}{\fs70}malfunction: 故障",
             output,
         )
 
         larger_english = source.replace("Style: Default,Arial,130", "Style: Default,Arial,70")
         larger_english = larger_english.replace("Style: Eng,Arial,70", "Style: Eng,Arial,130")
         output = AssFile(larger_english.encode("utf-8")).render({1: "malfunction: 故障", 2: ""}).decode("utf-8")
-        self.assertIn(r"{\rEng}The device had a malfunction.\N{\rDefault}{\an2}malfunction: 故障", output)
-        self.assertNotIn(r"\fs", output)
+        self.assertIn(r"{\rDefault\fnArial}{\fs130}The device had a malfunction.\N{\rEng\fnArial}{\an2}{\fs70}malfunction: 故障", output)
+
+    def test_swaps_style_attributes_but_keeps_each_language_font(self):
+        source = ASS.replace(
+            "Format: Name, Fontname\r\nStyle: Default,Arial",
+            "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\r\n"
+            "Style: Default,Chinese Font,130,&H00BFD1D5,&HF0000000,&H00000000,&H32000000,0,0,0,0,100,100,0,0,1,2,1,2,5,5,-300,134",
+        ).replace(
+            "[Events]",
+            "Style: Eng,English Font,70,&H008CA3AA,&HF0000000,&H00000000,&H32000000,0,-1,0,0,100,100,0,0,1,0,0,2,5,5,0,134\r\n[Events]",
+        )
+        output = AssFile(source.encode("utf-8")).render({1: "malfunction: 故障", 2: ""}).decode("utf-8")
+        self.assertIn(
+            r"{\rDefault\fnEnglish Font}{\fs130}The device had a malfunction.\N{\rEng\fnChinese Font}{\an2}{\fs70}malfunction: 故障",
+            output,
+        )
 
     def test_english_first_input_stays_english_first(self):
         source = ASS.replace(
