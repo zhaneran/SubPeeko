@@ -18,7 +18,7 @@ SubPeeko 会把常见的“中文在上、英文在下”改成英文优先布�
 | 处理前（中文 / 英文） | 处理后（英文 / 说明） |
 | --- | --- |
 | 中文翻译<br>*This appears to be a misunderstanding.* | *This appears to be a misunderstanding.*<br>**misunderstanding: 误会； appears: 似乎** |
-| 他们暂缓了提案<br>*They tabled the proposal.* | *They tabled the proposal.*<br>**tabled: 暂缓（提案）** |
+| 他们暂缓了提案<br>*They tabled the proposal.* | *They tabled (暂缓) the proposal.*<br>**tabled: 暂缓（提案）** |
 | 我需要再想想<br>*I need to mull it over.* | *I need to mull it over.*<br>**mull it over: 仔细考虑** |
 
 如果原始中文字幕字号更大，生成字幕还会交换中英文两行的字号。
@@ -100,6 +100,7 @@ subpeeko --help
 ## 输出行为
 
 - 英文在上，生成的中文说明在下。
+- 简短释义会内嵌在英文词组后，完整说明仍保留在下方。
 - 原始时间轴、英文、编码和无关 ASS 事件会保留。
 - 无法可靠识别的字幕布局保持不变。
 - 如果输出文件已经存在，必须指定 `--overwrite` 才会替换。

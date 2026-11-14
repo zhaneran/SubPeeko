@@ -49,9 +49,28 @@ class SubtitleTests(unittest.TestCase):
         result = subtitles.render({1: "malfunction: 故障", 2: ""})
         expected = ASS.replace(
             r"{\an2}装置似乎发生故障\N{\rEng}The device had a malfunction.",
-            r"{\rEng}The device had a malfunction.\N{\rDefault}{\an2}malfunction: 故障",
+            r"{\rEng}The device had a malfunction (故障).\N{\rDefault}{\an2}malfunction: 故障",
         ).replace(r"Yes.\N是的", r"Yes.")
         self.assertEqual(result, b"\xef\xbb\xbf" + expected.encode("utf-8"))
+
+    def test_empty_annotation_keeps_source_english_style(self):
+        source = r"""[Script Info]
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, MarginV
+Style: Default,Chinese,180,-300
+Style: Eng,English,100,0
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,中文翻译\N{\rEng}The original English line.
+""".replace("\n", "\r\n")
+        output = AssFile(source.encode()).render({1: ""}).decode()
+        self.assertIn(r"{\rEng}The original English line.", output)
+        self.assertNotIn(r"{\rDefault\fnEnglish}", output)
+
+    def test_inlines_short_meaning_and_keeps_full_annotation(self):
+        output = AssFile(ASS.encode()).render({1: "malfunction: 故障（设备故障）", 2: ""}).decode()
+        self.assertIn(r"{\rEng}The device had a malfunction (故障).", output)
+        self.assertIn(r"\N{\rDefault}{\an2}malfunction: 故障（设备故障）", output)
 
     def test_swaps_font_sizes_only_when_chinese_is_larger(self):
         source = ASS.replace(
@@ -64,14 +83,14 @@ class SubtitleTests(unittest.TestCase):
         subtitles = AssFile(source.encode("utf-8"))
         output = subtitles.render({1: "malfunction: 故障", 2: ""}).decode("utf-8")
         self.assertIn(
-            r"{\rDefault\fnArial}{\fs130}The device had a malfunction.\N{\rEng\fnArial}{\an2}{\fs70}malfunction: 故障",
+            r"{\rDefault\fnArial}{\fs130}The device had a malfunction (故障).\N{\rEng\fnArial}{\an2}{\fs70}malfunction: 故障",
             output,
         )
 
         larger_english = source.replace("Style: Default,Arial,130", "Style: Default,Arial,70")
         larger_english = larger_english.replace("Style: Eng,Arial,70", "Style: Eng,Arial,130")
         output = AssFile(larger_english.encode("utf-8")).render({1: "malfunction: 故障", 2: ""}).decode("utf-8")
-        self.assertIn(r"{\rDefault\fnArial}{\fs130}The device had a malfunction.\N{\rEng\fnArial}{\an2}{\fs70}malfunction: 故障", output)
+        self.assertIn(r"{\rDefault\fnArial}{\fs130}The device had a malfunction (故障).\N{\rEng\fnArial}{\an2}{\fs70}malfunction: 故障", output)
 
     def test_swaps_style_attributes_but_keeps_each_language_font(self):
         source = ASS.replace(
@@ -84,9 +103,16 @@ class SubtitleTests(unittest.TestCase):
         )
         output = AssFile(source.encode("utf-8")).render({1: "malfunction: 故障", 2: ""}).decode("utf-8")
         self.assertIn(
-            r"{\rDefault\fnEnglish Font}{\fs130}The device had a malfunction.\N{\rEng\fnChinese Font}{\an2}{\fs70}malfunction: 故障",
+            r"{\rDefault\fnEnglish Font}{\fs130}The device had a malfunction ({\fnChinese Font}故障{\fnEnglish Font}).\N{\rEng\fnChinese Font}{\an2}{\fs70}malfunction: 故障",
             output,
         )
+        self.assertIn(r"malfunction ({\fnChinese Font}故障{\fnEnglish Font})", output)
+        with_font = source.replace(
+            r"{\rEng}The device had a malfunction.",
+            r"{\rEng}The device {\fnInline Font}had a malfunction.",
+        )
+        output = AssFile(with_font.encode("utf-8")).render({1: "malfunction: 故障", 2: ""}).decode("utf-8")
+        self.assertIn(r"malfunction ({\fnChinese Font}故障{\fnInline Font})", output)
 
     def test_english_first_input_stays_english_first(self):
         source = ASS.replace(
@@ -94,7 +120,7 @@ class SubtitleTests(unittest.TestCase):
             r"{\rEng}The device had a malfunction.\N{\an2}装置似乎发生故障",
         )
         output = AssFile(source.encode()).render({1: "malfunction: 故障", 2: ""}).decode()
-        self.assertIn(r"{\rEng}The device had a malfunction.\N{\rDefault}{\an2}malfunction: 故障", output)
+        self.assertIn(r"{\rEng}The device had a malfunction (故障).\N{\rDefault}{\an2}malfunction: 故障", output)
 
     def test_inline_font_sizes_are_used_when_style_sizes_are_missing(self):
         source = ASS.replace(
@@ -102,7 +128,7 @@ class SubtitleTests(unittest.TestCase):
             r"{\fs130}装置似乎发生故障\N{\fs70}The device had a malfunction.",
         )
         output = AssFile(source.encode()).render({1: "malfunction: 故障", 2: ""}).decode()
-        self.assertIn(r"{\fs70}{\fs130}The device had a malfunction.\N{\rDefault}{\fs130}{\fs70}malfunction: 故障", output)
+        self.assertIn(r"{\fs70}{\fs130}The device had a malfunction (故障).\N{\rDefault}{\fs130}{\fs70}malfunction: 故障", output)
 
     def test_utf16_and_gb18030_round_trip(self):
         for encoding in ("utf-16", "gb18030"):
@@ -129,7 +155,7 @@ class SubtitleTests(unittest.TestCase):
         subtitles = AssFile(source.encode())
         self.assertEqual(subtitles.dialogues[0].english, "The device had a malfunction.")
         output = subtitles.render({1: "malfunction: 故障", 2: ""}).decode()
-        self.assertIn(r"{\rEng}The device\Nhad a malfunction.\N{\rDefault}{\an2}{\b1}malfunction: 故障", output)
+        self.assertIn(r"{\rEng}The device\Nhad a malfunction (故障).\N{\rDefault}{\an2}{\b1}malfunction: 故障", output)
 
     def test_rejects_unsupported_event_format(self):
         source = ASS.replace("MarginV, Effect, Text", "MarginV, Text, Effect")
@@ -171,10 +197,15 @@ class ModelTests(unittest.TestCase):
             {"span": "malfunction", "zh": r"{\pos(1,2)}故障", "level": "cet4", "kind": "word"}
         ]}]})
         note = ModelClient._parse(body, expected, "highschool")[1]
+        self.assertEqual(note, "malfunction: 故障")
         self.assertIn("故障", note)
         self.assertNotIn("{", note)
         self.assertNotIn("\\", note)
         self.assertEqual(ModelClient._parse(body, expected, "cet4")[1], "")
+        body = json.dumps({"items": [{"id": 1, "notes": [
+            {"span": "malfunction", "zh": "故障（仅指设备故障）", "level": "cet4", "kind": "word"}
+        ]}]})
+        self.assertEqual(ModelClient._parse(body, expected, "highschool")[1], "malfunction: 故障（仅指设备故障）")
         with self.assertRaises(ModelError):
             ModelClient._parse(body.replace("malfunction", "hallucination"), expected, "highschool")
         with self.assertRaises(ModelError):

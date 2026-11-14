@@ -42,7 +42,7 @@ reports the fallback. It does not fetch vocabulary at runtime.
 Inspect the contents before publishing.
 
 ```bash
-python -c "import zipfile; print(zipfile.ZipFile('dist/subpeeko-0.2.2-py3-none-any.whl').namelist())"
+python -c "import zipfile; print(zipfile.ZipFile('dist/subpeeko-0.2.3-py3-none-any.whl').namelist())"
 ```
 
 The artifacts must not contain `sample/`, `.env`, API keys, or ASS files. They
@@ -52,7 +52,7 @@ KyleBing license under `subpeeko/data/`.
 ## Test the wheel
 
 ```bash
-python -m pip install --force-reinstall --no-deps dist/subpeeko-0.2.2-py3-none-any.whl
+python -m pip install --force-reinstall --no-deps dist/subpeeko-0.2.3-py3-none-any.whl
 subpeeko --help
 ```
 

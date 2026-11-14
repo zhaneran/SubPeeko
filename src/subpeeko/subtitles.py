@@ -122,6 +122,86 @@ def _replace_visible(segment: str, annotation: str) -> str:
     return "".join(result)
 
 
+def _visible_positions(text: str) -> tuple[str, list[tuple[int, int]]]:
+    visible = []
+    positions = []
+    index = 0
+    while index < len(text):
+        if text[index] == "{":
+            close = text.find("}", index + 1)
+            if close < 0:
+                break
+            index = close + 1
+        elif text[index:index + 2] in (r"\N", r"\n", r"\h"):
+            visible.append(" ")
+            positions.append((index, index + 2))
+            index += 2
+        else:
+            visible.append(text[index])
+            positions.append((index, index + 1))
+            index += 1
+    return "".join(visible), positions
+
+
+def _short_meaning(meaning: str) -> str:
+    return re.split(r"[\(（\[［;；]", meaning, maxsplit=1)[0].strip(" ;；,，")
+
+
+def _font_tag(font_name: str) -> str:
+    safe_font = font_name.replace("\\", "").replace("}", "")
+    return f"{{\\fn{safe_font}}}" if safe_font else ""
+
+
+def _font_at(text: str, end: int, default: str) -> str:
+    current = default
+    for tag in TAG.finditer(text[:end]):
+        for command in ASS_FONT.finditer(tag.group()[1:-1]):
+            current = command.group("font").strip()
+    return current
+
+
+def _annotation_items(annotation: str) -> list[str]:
+    items = []
+    start = 0
+    depth = 0
+    for index, character in enumerate(annotation):
+        if character in "(（[［":
+            depth += 1
+        elif character in ")）]］":
+            depth = max(0, depth - 1)
+        elif character in ";；" and depth == 0:
+            items.append(annotation[start:index].strip())
+            start = index + 1
+    items.append(annotation[start:].strip())
+    return [item for item in items if item]
+
+
+def _inline_annotations(text: str, annotation: str, chinese_font: str, english_font: str) -> str:
+    visible, positions = _visible_positions(text)
+    if not visible or not positions:
+        return text
+    insertions = []
+    for item in _annotation_items(annotation):
+        span, separator, meaning = item.partition(": ")
+        short = _short_meaning(meaning) if separator else ""
+        if not span or not short:
+            continue
+        start = visible.find(span)
+        if start < 0:
+            continue
+        end = start + len(span)
+        if end > len(positions):
+            continue
+        raw_end = positions[end - 1][1]
+        current_english_font = _font_at(text, raw_end, english_font)
+        chinese_tag = _font_tag(chinese_font) if chinese_font and chinese_font != current_english_font else ""
+        english_tag = _font_tag(current_english_font) if chinese_tag else ""
+        insertions.append((raw_end, f" ({chinese_tag}{short}{english_tag})"))
+    for index, value in sorted(insertions, reverse=True):
+        text = text[:index] + value + text[index:]
+    return text
+
+
 def _leading_tags(text: str) -> str:
     match = re.match(r"[ \t]*(?:\{[^{}]*\})*", text)
     return match.group() if match else ""
@@ -320,6 +400,11 @@ class AssFile:
             content = line.rstrip("\r\n")
             layout = self._layouts[dialogue.id]
             annotation = annotations[dialogue.id]
+            if not annotation.strip():
+                # Keep the source English style; some source Chinese styles use
+                # negative margins that hide a line in common media players.
+                lines[dialogue.line_index] = line[:dialogue.text_start] + layout.english + line[len(content):]
+                continue
             chinese_style = _effective_style(layout.chinese, layout.event_style, self._styles)
             english_style = _effective_style(layout.english, layout.event_style, self._styles)
             chinese_font = _effective_font_name(layout.chinese, chinese_style, self._styles)
@@ -327,23 +412,24 @@ class AssFile:
             chinese_size = _effective_font_size(layout.chinese, layout.event_style, self._style_sizes)
             english_size = _effective_font_size(layout.english, layout.event_style, self._style_sizes)
             swap_size = chinese_size is not None and english_size is not None and chinese_size > english_size
+            english_source = _inline_annotations(layout.english, annotation, chinese_font, english_font)
             translated = _replace_visible(layout.chinese, annotation)
             swap_style = (
                 chinese_style is not None and english_style is not None
                 and chinese_style != english_style and chinese_font and english_font
             )
             if swap_style:
-                english = _rewrite_style(layout.english, chinese_style, english_font, self._styles)
+                english = _rewrite_style(english_source, chinese_style, english_font, self._styles)
                 translated = _rewrite_style(translated, english_style, chinese_font, self._styles)
                 english = _with_font_size(english, chinese_size if swap_size else english_size)
                 translated = _with_font_size(translated, english_size if swap_size else chinese_size)
             else:
-                english = _with_font_size(layout.english, chinese_size if swap_size else None)
+                english = _with_font_size(english_source, chinese_size if swap_size else None)
                 if annotation.strip() and TAG.search(layout.english) and not _has_style_reset(layout.chinese):
                     if layout.event_style:
                         # Reset the base style so English-only overrides do not leak into the notes.
                         translated = f"{{\\r{layout.event_style}}}" + translated
                 translated = _with_font_size(translated, english_size if swap_size else None)
-            replacement = english if not annotation.strip() else english + layout.separator + translated
+            replacement = english + layout.separator + translated
             lines[dialogue.line_index] = line[:dialogue.text_start] + replacement + line[len(content):]
         return _encode("".join(lines), self.encoding)

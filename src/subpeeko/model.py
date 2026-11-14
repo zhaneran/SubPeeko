@@ -39,11 +39,13 @@ Do not annotate ordinary proper names or output a
 full translation of the sentence. Each span
 must be an exact contiguous substring of the target English subtitle. If a
 phrase crosses subtitle boundaries, annotate the relevant substring in its own
-subtitle. Explain the meaning in this context concisely in Simplified Chinese.
+subtitle. Put the shortest contextual meaning first in the zh field. If a
+parenthetical explanation, example, usage note, or other detail is useful,
+keep it after the short meaning, for example "暂缓（提案）".
 For each note, choose kind: word, phrase, grammar, or sense. Use sense only
 when the specific meaning of a familiar word is genuinely advanced.
 Return ONLY JSON: {"items":[{"id":1,"notes":[{"span":"exact English text",
-"zh":"简短中文释义","level":"cet6","kind":"word"}]}]}. Return exactly one item for every
+"zh":"简短释义（必要的补充说明）","level":"cet6","kind":"word"}]}]}. Return exactly one item for every
 target id, including an empty notes array when no annotation is needed.
 """
 
@@ -63,6 +65,10 @@ class _NoRedirect(HTTPRedirectHandler):
 
 def _clean(text: str) -> str:
     return " ".join(text.replace("{", "（").replace("}", "）").replace("\\", "＼").split())
+
+
+def _clean_meaning(text: str) -> str:
+    return _clean(re.sub(r"\{\\[^{}]*\}", " ", text)).strip(" ;；,，")
 
 
 def _alibaba_qwen(config: Config) -> bool:
@@ -319,7 +325,9 @@ class ModelClient:
                         if hints[0]["level"] != "unknown":
                             rank = LEVELS.index(hints[0]["level"])
                     if rank > LEVELS.index(level):
-                        annotations.append(f"{_clean(span)}: {_clean(chinese)}")
+                        meaning = _clean_meaning(chinese)
+                        if meaning:
+                            annotations.append(f"{_clean(span)}: {meaning}")
                 output[identifier] = "； ".join(annotations)
             if output.keys() != expected.keys():
                 raise ValueError

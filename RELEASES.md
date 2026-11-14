@@ -1,5 +1,38 @@
 # Releases
 
+## 0.2.3 — 2026-11-14
+
+Status: prepared for publication.
+
+This release adds inline learning hints while retaining the complete Chinese
+annotation below each English subtitle.
+
+### Included
+
+- Embed the short contextual meaning after each annotated English span.
+- Keep useful parenthetical explanations, labels, and extra details in the
+  full annotation below.
+- Switch to the Chinese font for inline meanings and restore the surrounding
+  English font, including existing inline font changes.
+- Keep English-only generated events visible by preserving their source
+  English style.
+
+### Package files
+
+The build produces the following artifacts in `dist/`.
+
+- `subpeeko-0.2.3-py3-none-any.whl`
+- `subpeeko-0.2.3.tar.gz`
+
+### Release checklist
+
+1. Run the test suite and build validation described in [BUILD.md](BUILD.md).
+2. Inspect both artifacts with `twine check dist/*`.
+3. Confirm that `sample/`, `.env`, API keys, and ASS files are absent from the
+   artifacts.
+4. Create the Git tag `v0.2.3` after the release commit is approved.
+5. Let `.github/workflows/release.yml` publish the tag.
+
 ## 0.2.2 — 2026-11-14
 
 Status: prepared for publication.

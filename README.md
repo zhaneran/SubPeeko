@@ -24,7 +24,7 @@ layout:
 | Before (Chinese / English) | After (English / notes) |
 | --- | --- |
 | 中文翻译<br>*This appears to be a misunderstanding.* | *This appears to be a misunderstanding.*<br>**misunderstanding: 误会； appears: 似乎** |
-| 他们暂缓了提案<br>*They tabled the proposal.* | *They tabled the proposal.*<br>**tabled: 暂缓（提案）** |
+| 他们暂缓了提案<br>*They tabled the proposal.* | *They tabled (暂缓) the proposal.*<br>**tabled: 暂缓（提案）** |
 | 我需要再想想<br>*I need to mull it over.* | *I need to mull it over.*<br>**mull it over: 仔细考虑** |
 
 When the source Chinese font is larger than the English font, the generated
@@ -109,6 +109,7 @@ subpeeko --help
 ## Output behavior
 
 - English stays on the top line and generated Chinese notes go below it.
+- Short meanings are shown inline after annotated English spans; full notes stay below.
 - Original timing, English text, encoding, and unrelated ASS events are kept.
 - Ambiguous or unsupported subtitle layouts are left unchanged.
 - If a result already exists, SubPeeko stops unless `--overwrite` is used.
