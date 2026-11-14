@@ -59,12 +59,29 @@ subpeeko --help
 Use an isolated environment for this check so that the wheel is tested instead
 of an editable checkout.
 
-## Publish
+## Manual publish
 
-Publishing is intentionally a separate step from building. After reviewing the
-release notes, artifacts, license files, and package index settings, upload the
-artifacts with the package index's approved credentials.
+If you are not using the tagged release workflow, upload the artifacts manually
+after reviewing the release notes, license files, and package index settings.
 
 ```bash
 python -m twine upload dist/*
 ```
+
+## Automated tagged releases
+
+Pushing a tag such as `v0.2.1` starts `.github/workflows/release.yml`. The
+workflow checks that the tag matches `pyproject.toml`, runs the tests, builds
+and checks both distributions, publishes them to PyPI, and creates a GitHub
+Release with the files attached.
+
+Before the first automated release, add a PyPI Trusted Publisher for:
+
+- owner: `zhaneran`
+- repository: `SubPeeko`
+- workflow: `.github/workflows/release.yml`
+- environment: `pypi`
+
+After that one-time setup, update the version, commit it, and push the matching
+`vX.Y.Z` tag. The workflow uses short-lived OIDC credentials; no PyPI API token
+is stored in GitHub Secrets.
