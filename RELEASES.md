@@ -1,5 +1,38 @@
 # Releases
 
+## 0.2.4 — 2026-11-15
+
+Status: prepared for publication.
+
+This release improves ASS style handling for generated English-first subtitles.
+
+### Included
+
+- Exchange the source ASS style attributes between English and Chinese lines
+  while preserving each language's font.
+- Normalize negative vertical margins in generated styles so both lines remain
+  visible in subtitle players.
+- Keep the hidden Chinese layout placeholder for English-only generated events
+  and escape ASS style resets as literal tags.
+- Add regression coverage for full style swapping, cloned visible styles, and
+  empty annotations.
+
+### Package files
+
+The build produces the following artifacts in `dist/`.
+
+- `subpeeko-0.2.4-py3-none-any.whl`
+- `subpeeko-0.2.4.tar.gz`
+
+### Release checklist
+
+1. Run the test suite and build validation described in [BUILD.md](BUILD.md).
+2. Inspect both artifacts with `twine check dist/*`.
+3. Confirm that `sample/`, `.env`, API keys, and ASS files are absent from the
+   artifacts.
+4. Create the Git tag `v0.2.4` after the release commit is approved.
+5. Let `.github/workflows/release.yml` publish the tag.
+
 ## 0.2.3 — 2026-11-14
 
 Status: prepared for publication.

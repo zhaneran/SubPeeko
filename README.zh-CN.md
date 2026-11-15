@@ -21,7 +21,8 @@ SubPeeko 会把常见的“中文在上、英文在下”改成英文优先布�
 | 他们暂缓了提案<br>*They tabled the proposal.* | *They tabled (暂缓) the proposal.*<br>**tabled: 暂缓（提案）** |
 | 我需要再想想<br>*I need to mull it over.* | *I need to mull it over.*<br>**mull it over: 仔细考虑** |
 
-如果原始中文字幕字号更大，生成字幕还会交换中英文两行的字号。
+生成字幕会交换中英文两行除 `Fontname` 外的样式属性，同时保留各自语言字体。
+生成样式中的负垂直边距会被调整为可见值，避免播放器把字幕移出画面。
 
 ## 安装
 

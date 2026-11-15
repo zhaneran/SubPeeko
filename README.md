@@ -27,8 +27,10 @@ layout:
 | 他们暂缓了提案<br>*They tabled the proposal.* | *They tabled (暂缓) the proposal.*<br>**tabled: 暂缓（提案）** |
 | 我需要再想想<br>*I need to mull it over.* | *I need to mull it over.*<br>**mull it over: 仔细考虑** |
 
-When the source Chinese font is larger than the English font, the generated
-subtitle exchanges those two sizes as well.
+Generated English and Chinese note lines exchange the source style attributes
+while keeping each line's original `Fontname`.
+Negative vertical margins are normalized in generated styles so subtitle
+players keep the text visible.
 
 ## Install
 

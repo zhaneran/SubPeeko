@@ -272,11 +272,12 @@ def _rewrite_style(
     whitespace = prefix[:len(prefix) - len(leading)]
     retained = []
     for tag in TAG.finditer(leading):
-        content = re.sub(r"\\r[^\\]*", "", tag.group()[1:-1], flags=re.IGNORECASE)
+        content = re.sub(r"\\(?:r[^\\]*|fn[^\\]*|fs-?\d+(?:\.\d+)?)", "", tag.group()[1:-1], flags=re.IGNORECASE)
         if content:
             retained.append("{" + content + "}")
     safe_font = font_name.replace("\\", "").replace("}", "")
-    reset = f"{{\\r{_style_display_name(styles, target_style)}\\fn{safe_font}}}"
+    font = f"\\fn{safe_font}" if safe_font else ""
+    reset = f"{{\\r{_style_display_name(styles, target_style)}{font}}}"
     return whitespace + reset + "".join(retained) + text[len(prefix):]
 
 
@@ -298,6 +299,11 @@ class AssFile:
         self._layouts: dict[int, _DialogueLayout] = {}
         self._styles: dict[str, dict[str, str]] = {}
         self._style_sizes: dict[str, float] = {}
+        self._style_fields: list[str] = []
+        self._style_insert_index: int | None = None
+        self._style_clones: dict[str, str] = {}
+        self._style_clone_lines: dict[str, str] = {}
+        self._line_ending = "\r\n" if any(line.endswith("\r\n") for line in self.lines) else "\n"
         section = ""
         fields: list[str] = []
         style_fields: list[str] = []
@@ -307,7 +313,10 @@ class AssFile:
             content = line.rstrip("\r\n")
             stripped = content.strip()
             if stripped.startswith("[") and stripped.endswith("]"):
-                section = stripped.casefold()
+                next_section = stripped.casefold()
+                if next_section == "[events]" and section in STYLE_SECTIONS:
+                    self._style_insert_index = line_index
+                section = next_section
                 saw_events |= section == "[events]"
                 if section not in STYLE_SECTIONS:
                     style_fields = []
@@ -315,6 +324,7 @@ class AssFile:
             if section in STYLE_SECTIONS:
                 if stripped.casefold().startswith("format:"):
                     style_fields = [item.strip().casefold() for item in stripped.split(":", 1)[1].split(",")]
+                    self._style_fields = style_fields.copy()
                     continue
                 match = re.match(r"^\s*Style\s*:\s*", content, re.IGNORECASE)
                 if match and style_fields and "name" in style_fields and "fontsize" in style_fields:
@@ -391,8 +401,43 @@ class AssFile:
         except OSError as exc:
             raise SubtitleError(f"Cannot read subtitle: {path}") from exc
 
+    def _output_style(self, name: str | None, pending: list[str]) -> str | None:
+        if name is None or self._style_insert_index is None:
+            return name
+        key = name.casefold()
+        if key in self._style_clones:
+            line = self._style_clone_lines[key]
+            if line not in pending:
+                pending.append(line)
+            return self._style_clones[key]
+        style = self._styles.get(key)
+        if style is None:
+            return name
+        try:
+            margin = float(style.get("marginv", "0"))
+        except ValueError:
+            return name
+        if not math.isfinite(margin) or margin >= 0:
+            return name
+        base = f"SubPeeko {style.get('name', name)} Visible"
+        alias = base
+        suffix = 2
+        while alias.casefold() in self._styles:
+            alias = f"{base} {suffix}"
+            suffix += 1
+        clone = dict(style)
+        clone["name"] = alias
+        clone["marginv"] = _format_font_size(abs(margin))
+        self._styles[alias.casefold()] = clone
+        self._style_clones[key] = alias.casefold()
+        line = "Style: " + ",".join(clone.get(field, "") for field in self._style_fields) + self._line_ending
+        self._style_clone_lines[key] = line
+        pending.append(line)
+        return alias.casefold()
+
     def render(self, annotations: dict[int, str]) -> bytes:
         lines = self.lines.copy()
+        pending_styles: list[str] = []
         for dialogue in self.dialogues:
             if dialogue.id not in annotations:
                 raise SubtitleError(f"Missing result for dialogue {dialogue.id}")
@@ -400,36 +445,48 @@ class AssFile:
             content = line.rstrip("\r\n")
             layout = self._layouts[dialogue.id]
             annotation = annotations[dialogue.id]
-            if not annotation.strip():
-                # Keep the source English style; some source Chinese styles use
-                # negative margins that hide a line in common media players.
-                lines[dialogue.line_index] = line[:dialogue.text_start] + layout.english + line[len(content):]
-                continue
             chinese_style = _effective_style(layout.chinese, layout.event_style, self._styles)
             english_style = _effective_style(layout.english, layout.event_style, self._styles)
             chinese_font = _effective_font_name(layout.chinese, chinese_style, self._styles)
             english_font = _effective_font_name(layout.english, english_style, self._styles)
             chinese_size = _effective_font_size(layout.chinese, layout.event_style, self._style_sizes)
             english_size = _effective_font_size(layout.english, layout.event_style, self._style_sizes)
-            swap_size = chinese_size is not None and english_size is not None and chinese_size > english_size
-            english_source = _inline_annotations(layout.english, annotation, chinese_font, english_font)
-            translated = _replace_visible(layout.chinese, annotation)
             swap_style = (
                 chinese_style is not None and english_style is not None
-                and chinese_style != english_style and chinese_font and english_font
+                and chinese_style != english_style
             )
+            output_chinese_style = self._output_style(chinese_style, pending_styles)
+            output_english_style = self._output_style(english_style, pending_styles)
+            if not annotation.strip():
+                english = (
+                    _rewrite_style(layout.english, output_chinese_style, english_font, self._styles)
+                    if swap_style else _with_font_size(layout.english, chinese_size)
+                )
+                spacer = _replace_visible(layout.chinese, r"{\alpha&HFF&}中")
+                if swap_style:
+                    spacer = _rewrite_style(spacer, output_english_style, chinese_font, self._styles)
+                else:
+                    if TAG.search(layout.english) and not _has_style_reset(layout.chinese):
+                        if layout.event_style:
+                            spacer = f"{{\\r{layout.event_style}}}" + spacer
+                    spacer = _with_font_size(spacer, english_size)
+                replacement = english + layout.separator + spacer
+                lines[dialogue.line_index] = line[:dialogue.text_start] + replacement + line[len(content):]
+                continue
+            english_source = _inline_annotations(layout.english, annotation, chinese_font, english_font)
+            translated = _replace_visible(layout.chinese, annotation)
             if swap_style:
-                english = _rewrite_style(english_source, chinese_style, english_font, self._styles)
-                translated = _rewrite_style(translated, english_style, chinese_font, self._styles)
-                english = _with_font_size(english, chinese_size if swap_size else english_size)
-                translated = _with_font_size(translated, english_size if swap_size else chinese_size)
+                english = _rewrite_style(english_source, output_chinese_style, english_font, self._styles)
+                translated = _rewrite_style(translated, output_english_style, chinese_font, self._styles)
             else:
-                english = _with_font_size(english_source, chinese_size if swap_size else None)
+                english = _with_font_size(english_source, chinese_size)
                 if annotation.strip() and TAG.search(layout.english) and not _has_style_reset(layout.chinese):
                     if layout.event_style:
                         # Reset the base style so English-only overrides do not leak into the notes.
                         translated = f"{{\\r{layout.event_style}}}" + translated
-                translated = _with_font_size(translated, english_size if swap_size else None)
+                translated = _with_font_size(translated, english_size)
             replacement = english + layout.separator + translated
             lines[dialogue.line_index] = line[:dialogue.text_start] + replacement + line[len(content):]
+        if pending_styles and self._style_insert_index is not None:
+            lines[self._style_insert_index:self._style_insert_index] = pending_styles
         return _encode("".join(lines), self.encoding)

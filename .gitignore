@@ -6,6 +6,7 @@
 !.env.example
 
 # Common development artifacts
+.idea/
 __pycache__/
 *.py[cod]
 *.egg-info/
