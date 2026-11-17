@@ -46,12 +46,29 @@ class SubtitleTests(unittest.TestCase):
         original = b"\xef\xbb\xbf" + ASS.encode("utf-8")
         subtitles = AssFile(original)
         self.assertEqual(len(subtitles.dialogues), 2)
-        result = subtitles.render({1: "malfunction: 故障", 2: ""})
+        result = subtitles.render({1: "malfunction: 故障", 2: ""}, inline_mode=True)
         expected = ASS.replace(
             r"{\an2}装置似乎发生故障\N{\rEng}The device had a malfunction.",
             r"{\rEng}The device had a malfunction (故障).\N{\rDefault}{\an2}malfunction: 故障",
         ).replace(r"Yes.\N是的", r"Yes.\N{\alpha&HFF&}中")
         self.assertEqual(result, b"\xef\xbb\xbf" + expected.encode("utf-8"))
+
+    def test_default_mode_preserves_original_events_and_encoding(self):
+        source = ASS.replace(
+            "Format: Name, Fontname\r\nStyle: Default,Arial",
+            "Format: Name, Fontname, Fontsize, MarginV\r\n"
+            "Style: Default,Chinese,180,-300\r\nStyle: Eng,English,100,0",
+        ).replace(
+            r"装置似乎发生故障\N{\rEng}The device had a malfunction.",
+            r"{\b1}装置似乎\N发生故障\N{\rEng}The device\Nhad a malfunction.",
+        )
+        for encoding in ("utf-8-sig", "utf-16", "gb18030"):
+            with self.subTest(encoding=encoding):
+                original = source.encode(encoding)
+                subtitles = AssFile(original)
+                subtitles.render({1: "", 2: ""})
+                result = subtitles.render({1: "malfunction: 故障", 2: "Yes: 是"})
+                self.assertEqual(result, original)
 
     def test_empty_annotation_uses_chinese_style_and_english_font(self):
         source = r"""[Script Info]
@@ -79,7 +96,7 @@ Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,中文翻译\N{\rEng}The origi
         self.assertNotIn("{\rDefault}", output)
 
     def test_inlines_short_meaning_and_keeps_full_annotation(self):
-        output = AssFile(ASS.encode()).render({1: "malfunction: 故障（设备故障）", 2: ""}).decode()
+        output = AssFile(ASS.encode()).render({1: "malfunction: 故障（设备故障）", 2: ""}, inline_mode=True).decode()
         self.assertIn(r"{\rEng}The device had a malfunction (故障).", output)
         self.assertIn(r"\N{\rDefault}{\an2}malfunction: 故障（设备故障）", output)
 
@@ -92,7 +109,7 @@ Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,中文翻译\N{\rEng}The origi
             "Style: Eng,Arial,70\r\n[Events]",
         )
         subtitles = AssFile(source.encode("utf-8"))
-        output = subtitles.render({1: "malfunction: 故障", 2: ""}).decode("utf-8")
+        output = subtitles.render({1: "malfunction: 故障", 2: ""}, inline_mode=True).decode("utf-8")
         self.assertIn(
             r"{\rDefault\fnArial}The device had a malfunction (故障).\N{\rEng\fnArial}{\an2}malfunction: 故障",
             output,
@@ -100,7 +117,7 @@ Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,中文翻译\N{\rEng}The origi
 
         larger_english = source.replace("Style: Default,Arial,130", "Style: Default,Arial,70")
         larger_english = larger_english.replace("Style: Eng,Arial,70", "Style: Eng,Arial,130")
-        output = AssFile(larger_english.encode("utf-8")).render({1: "malfunction: 故障", 2: ""}).decode("utf-8")
+        output = AssFile(larger_english.encode("utf-8")).render({1: "malfunction: 故障", 2: ""}, inline_mode=True).decode("utf-8")
         self.assertIn(r"{\rDefault\fnArial}The device had a malfunction (故障).\N{\rEng\fnArial}{\an2}malfunction: 故障", output)
 
     def test_swaps_style_attributes_but_keeps_each_language_font(self):
@@ -112,7 +129,7 @@ Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,中文翻译\N{\rEng}The origi
             "[Events]",
             "Style: Eng,English Font,70,&H008CA3AA,&HF0000000,&H00000000,&H32000000,0,-1,0,0,100,100,0,0,1,0,0,2,5,5,0,134\r\n[Events]",
         )
-        output = AssFile(source.encode("utf-8")).render({1: "malfunction: 故障", 2: ""}).decode("utf-8")
+        output = AssFile(source.encode("utf-8")).render({1: "malfunction: 故障", 2: ""}, inline_mode=True).decode("utf-8")
         self.assertIn(
             r"{\rSubPeeko Default Visible\fnEnglish Font}The device had a malfunction ({\fnChinese Font}故障{\fnEnglish Font}).\N{\rEng\fnChinese Font}{\an2}malfunction: 故障",
             output,
@@ -122,7 +139,7 @@ Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,中文翻译\N{\rEng}The origi
             r"{\rEng}The device had a malfunction.",
             r"{\rEng}The device {\fnInline Font}had a malfunction.",
         )
-        output = AssFile(with_font.encode("utf-8")).render({1: "malfunction: 故障", 2: ""}).decode("utf-8")
+        output = AssFile(with_font.encode("utf-8")).render({1: "malfunction: 故障", 2: ""}, inline_mode=True).decode("utf-8")
         self.assertIn(r"malfunction ({\fnChinese Font}故障{\fnInline Font})", output)
 
     def test_english_first_input_stays_english_first(self):
@@ -130,7 +147,7 @@ Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,中文翻译\N{\rEng}The origi
             r"{\an2}装置似乎发生故障\N{\rEng}The device had a malfunction.",
             r"{\rEng}The device had a malfunction.\N{\an2}装置似乎发生故障",
         )
-        output = AssFile(source.encode()).render({1: "malfunction: 故障", 2: ""}).decode()
+        output = AssFile(source.encode()).render({1: "malfunction: 故障", 2: ""}, inline_mode=True).decode()
         self.assertIn(r"{\rEng}The device had a malfunction (故障).\N{\rDefault}{\an2}malfunction: 故障", output)
 
     def test_inline_font_sizes_are_used_when_style_sizes_are_missing(self):
@@ -138,7 +155,7 @@ Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,中文翻译\N{\rEng}The origi
             r"{\an2}装置似乎发生故障\N{\rEng}The device had a malfunction.",
             r"{\fs130}装置似乎发生故障\N{\fs70}The device had a malfunction.",
         )
-        output = AssFile(source.encode()).render({1: "malfunction: 故障", 2: ""}).decode()
+        output = AssFile(source.encode()).render({1: "malfunction: 故障", 2: ""}, inline_mode=True).decode()
         self.assertIn(r"{\fs70}{\fs130}The device had a malfunction (故障).\N{\rDefault}{\fs130}{\fs70}malfunction: 故障", output)
 
     def test_utf16_and_gb18030_round_trip(self):
@@ -146,7 +163,7 @@ Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,中文翻译\N{\rEng}The origi
             with self.subTest(encoding=encoding):
                 source = ASS.encode(encoding)
                 subtitles = AssFile(source)
-                output = subtitles.render({1: "malfunction: 故障", 2: ""})
+                output = subtitles.render({1: "malfunction: 故障", 2: ""}, inline_mode=True)
                 self.assertIn("malfunction: 故障", output.decode(encoding))
                 if encoding == "utf-16":
                     self.assertEqual(output[:2], source[:2])
@@ -165,7 +182,7 @@ Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,中文翻译\N{\rEng}The origi
         )
         subtitles = AssFile(source.encode())
         self.assertEqual(subtitles.dialogues[0].english, "The device had a malfunction.")
-        output = subtitles.render({1: "malfunction: 故障", 2: ""}).decode()
+        output = subtitles.render({1: "malfunction: 故障", 2: ""}, inline_mode=True).decode()
         self.assertIn(r"{\rEng}The device\Nhad a malfunction (故障).\N{\rDefault}{\an2}{\b1}malfunction: 故障", output)
 
     def test_rejects_unsupported_event_format(self):
@@ -189,6 +206,22 @@ class VocabularyTests(unittest.TestCase):
 
 
 class ModelTests(unittest.TestCase):
+    def test_default_batch_size_and_concurrency(self):
+        client = ModelClient(Config("http://127.0.0.1/v1", "test", "secret"))
+        records = [dialogue(i, f"Sentence {i}", f"中文{i}") for i in range(1, 17)]
+        batch_sizes = []
+
+        def respond(messages):
+            identifiers = json.loads(messages[-1]["content"])["target_ids"]
+            batch_sizes.append(len(identifiers))
+            return json.dumps({"items": [{"id": i, "notes": []} for i in identifiers]})
+
+        with patch.object(client, "_request", side_effect=respond):
+            result = client.analyze(records, "cet4")
+        self.assertEqual(client.workers, 4)
+        self.assertEqual(sorted(batch_sizes), [1, 15])
+        self.assertEqual(set(result), set(range(1, 17)))
+
     def test_simple_and_duplicate_dialogues_are_all_reviewed(self):
         client = ModelClient(Config("http://127.0.0.1/v1", "test", "secret"), batch_size=20, workers=1)
         records = [dialogue(i, "Yes!", "是的") for i in range(1, 8)]
@@ -627,7 +660,7 @@ class CliIntegrationTests(unittest.TestCase):
         source = self.root / "电影.ass"
         source.write_bytes(ASS.encode("utf-8-sig"))
         original = source.read_bytes()
-        status, output, _ = self.run_cli([str(source), "--level", "highschool"])
+        status, output, _ = self.run_cli([str(source), "--level", "highschool", "--inline-mode"])
         target = self.root / "电影.highschool.subpeeko.ass"
         self.assertEqual(status, 0)
         self.assertTrue(target.exists())
@@ -643,6 +676,56 @@ class CliIntegrationTests(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertIn("already exists", error)
         self.assertEqual(len(MockHandler.calls), 1)
+
+    def test_default_and_inline_modes_use_level_aware_results_and_existing_checkpoint(self):
+        extra = (
+            r"Dialogue: 0,0:00:06.00,0:00:07.00,Default,,0,0,0,,我需要仔细考虑\NI need to mull it over." "\r\n"
+            r"Dialogue: 0,0:00:07.00,0:00:08.00,Default,,0,0,0,,我要是你就会等\NIf I were you, I would wait." "\r\n"
+            r"Dialogue: 0,0:00:08.00,0:00:09.00,Default,,0,0,0,,他们暂缓了提案\NThey tabled the proposal." "\r\n"
+        )
+        source = ASS.replace("[Aegisub Extradata]", extra + "[Aegisub Extradata]")
+        path = self.root / "movie.ass"
+        original = source.encode("utf-8-sig")
+        path.write_bytes(original)
+        points = [
+            {"span": "malfunction", "zh": "故障", "level": "cet4", "kind": "word"},
+            {"span": "mull it over", "zh": "仔细考虑", "level": "cet6", "kind": "phrase"},
+            {"span": "If I were you", "zh": "虚拟语气", "level": "postgrad", "kind": "grammar"},
+            {"span": "tabled", "zh": "暂缓", "level": "cet6", "kind": "sense"},
+        ]
+
+        def respond(client, messages):
+            payload = json.loads(messages[-1]["content"])
+            rows = {row["id"]: row for row in payload["dialogue"]}
+            return json.dumps({"items": [
+                {"id": identifier, "notes": [point for point in points if point["span"] in rows[identifier]["english"]]}
+                for identifier in payload["target_ids"]
+            ]})
+
+        arguments = [str(path), "--level", "highschool"]
+        target = self.root / "movie.highschool.subpeeko.ass"
+        with patch.object(ModelClient, "_request", autospec=True, side_effect=respond) as request:
+            status, _, error = self.run_cli(arguments)
+            self.assertEqual(status, 0, error)
+            expected = source.replace(r"Yes.\N是的", r"Yes.\N{\alpha&HFF&}中")
+            self.assertEqual(target.read_bytes(), expected.encode("utf-8-sig"))
+            self.assertEqual(path.read_bytes(), original)
+
+            status, output, error = self.run_cli(arguments + ["--inline-mode", "--overwrite"])
+            self.assertEqual(status, 0, error)
+            self.assertIn("Resuming: 5/5", output)
+            self.assertEqual(request.call_count, 1)
+            self.assertIn("malfunction: 故障", target.read_bytes().decode("utf-8-sig"))
+            self.assertIn("malfunction (故障)", target.read_bytes().decode("utf-8-sig"))
+            self.assertEqual(path.read_bytes(), original)
+
+            status, _, error = self.run_cli([str(path), "--level", "cet4"])
+            self.assertEqual(status, 0, error)
+            self.assertEqual(request.call_count, 2)
+            higher_level = (self.root / "movie.cet4.subpeeko.ass").read_bytes().decode("utf-8-sig")
+            self.assertIn(r"{\rEng}The device had a malfunction.\N{\rDefault}{\an2}{\alpha&HFF&}中", higher_level)
+            for event in extra.splitlines():
+                self.assertIn(event, higher_level)
 
     def test_directory_recursive_dry_run_and_generated_outputs_are_excluded(self):
         (self.root / "one.ASS").write_text(ASS, encoding="utf-8")
@@ -709,8 +792,12 @@ class CliIntegrationTests(unittest.TestCase):
         self.assertTrue((self.root / "movie.cet4.subpeeko.ass").exists())
 
     def test_individual_concurrency_and_quota_options_can_be_overridden(self):
+        defaults = cli.parser().parse_args(["movie.ass", "--level", "cet4"])
+        self.assertEqual((defaults.batch_size, defaults.concurrency, defaults.inline_mode), (15, 4, False))
         args = cli.parser().parse_args(["movie.ass", "--level", "cet4", "--concurrency", "1", "--tpm", "100000"])
         self.assertEqual((args.concurrency, args.rpm, args.tpm), (1, 60, 100_000))
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            cli.parser().parse_args(["movie.ass", "--level", "cet4", "--keep-original"])
 
     def test_interrupted_run_resumes_only_completed_dialogues(self):
         source = self.root / "movie.ass"
@@ -820,7 +907,7 @@ class CliIntegrationTests(unittest.TestCase):
         MockHandler.invalid = False
         status, _, _ = self.run_cli([str(source), "--level", "highschool", "--overwrite"])
         self.assertEqual(status, 0)
-        self.assertIn("malfunction: 故障", target.read_text(encoding="utf-8"))
+        self.assertIn(r"{\an2}装置似乎发生故障\N{\rEng}The device had a malfunction.", target.read_text(encoding="utf-8"))
 
     def test_model_redirect_is_not_followed_with_api_key(self):
         MockHandler.redirect = True

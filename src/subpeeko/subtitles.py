@@ -435,16 +435,18 @@ class AssFile:
         pending.append(line)
         return alias.casefold()
 
-    def render(self, annotations: dict[int, str]) -> bytes:
+    def render(self, annotations: dict[int, str], *, inline_mode: bool = False) -> bytes:
         lines = self.lines.copy()
         pending_styles: list[str] = []
         for dialogue in self.dialogues:
             if dialogue.id not in annotations:
                 raise SubtitleError(f"Missing result for dialogue {dialogue.id}")
+            annotation = annotations[dialogue.id]
+            if not inline_mode and annotation.strip():
+                continue
             line = lines[dialogue.line_index]
             content = line.rstrip("\r\n")
             layout = self._layouts[dialogue.id]
-            annotation = annotations[dialogue.id]
             chinese_style = _effective_style(layout.chinese, layout.event_style, self._styles)
             english_style = _effective_style(layout.english, layout.event_style, self._styles)
             chinese_font = _effective_font_name(layout.chinese, chinese_style, self._styles)

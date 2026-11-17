@@ -8,12 +8,14 @@
 <a href="LICENSE"><img src="https://img.shields.io/github/license/zhaneran/SubPeeko" alt="许可证"></a>
 </p>
 
-SubPeeko 可以把双语英中 ASS 字幕转换为英语学习字幕。它保留原始英文，
-并在下面加入高于所选学习等级的简洁中文说明。
+SubPeeko 可以把双语英中 ASS 字幕转换为英语学习字幕。默认情况下，检测到
+超出所选学习等级的语言点时保留原始双语对白，否则只显示英文。
+也可以启用内嵌模式，为超纲语言点添加简洁的中文说明。
 
 ## 效果示例
 
-SubPeeko 会把常见的“中文在上、英文在下”改成英文优先布局：
+默认情况下，含超纲语言点的对白保留原始双语内容和样式；其他对白只显示英文。
+启用 `--inline-mode` 后，字幕采用英文优先布局并显示中文说明：
 
 | 处理前（中文 / 英文） | 处理后（英文 / 说明） |
 | --- | --- |
@@ -21,7 +23,7 @@ SubPeeko 会把常见的“中文在上、英文在下”改成英文优先布�
 | 他们暂缓了提案<br>*They tabled the proposal.* | *They tabled (暂缓) the proposal.*<br>**tabled: 暂缓（提案）** |
 | 我需要再想想<br>*I need to mull it over.* | *I need to mull it over.*<br>**mull it over: 仔细考虑** |
 
-生成字幕会交换中英文两行除 `Fontname` 外的样式属性，同时保留各自语言字体。
+内嵌模式会交换中英文两行除 `Fontname` 外的样式属性，同时保留各自语言字体。
 生成样式中的负垂直边距会被调整为可见值，避免播放器把字幕移出画面。
 
 ## 安装
@@ -70,6 +72,12 @@ SUBPEEKO_API_KEY=your-api-key
 subpeeko "movie.ass" --level cet4
 ```
 
+在英文内和下方显示中文说明：
+
+```bash
+subpeeko "movie.ass" --level cet4 --inline-mode
+```
+
 转换目录，或递归处理子目录：
 
 ```bash
@@ -84,11 +92,12 @@ subpeeko "./subtitles" --level cet4 --recursive
 
 | 选项 | 用途 |
 | --- | --- |
+| `--inline-mode` | 在英文内和下方显示中文说明。 |
 | `--recursive` | 目录输入时包含子目录。 |
 | `--overwrite` | 替换已经存在的生成文件。 |
 | `--dry-run` | 只列出输入和输出路径，不调用模型、不写文件。 |
-| `--batch-size N` | 设置每次请求处理的目标对白数量。 |
-| `--concurrency N` | 设置同时执行的请求数量。 |
+| `--batch-size N` | 设置每次请求处理的目标对白数量，默认 15。 |
+| `--concurrency N` | 设置同时执行的请求数量，默认 4。 |
 | `--no-resume` | 忽略已保存进度，从头开始。 |
 | `--thinking {off,on,auto}` | 选择模型思考模式。 |
 
@@ -100,8 +109,10 @@ subpeeko --help
 
 ## 输出行为
 
-- 英文在上，生成的中文说明在下。
-- 简短释义会内嵌在英文词组后，完整说明仍保留在下方。
+- 默认情况下，检测出超出所选等级的单词、短语、语法或词义时，对应对白保留
+  原始双语内容、语言顺序和样式；没有超纲内容的对白只显示英文。
+  模型会检查所有支持的对白。
+- 启用 `--inline-mode` 后，英文在上，完整中文说明在下，简短释义内嵌在英文词组后。
 - 原始时间轴、英文、编码和无关 ASS 事件会保留。
 - 无法可靠识别的字幕布局保持不变。
 - 如果输出文件已经存在，必须指定 `--overwrite` 才会替换。

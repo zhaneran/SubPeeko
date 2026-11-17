@@ -10,10 +10,10 @@ The current command-line implementation uses one configured OpenAI-compatible
 Chat Completions model. It computes vocabulary hints locally, sends eligible
 bilingual dialogues in batches, and asks the model to decide which words,
 phrases, grammar points, and context-specific meanings exceed the selected
-level. The model also writes the concise Chinese explanations that are inserted
-into the generated ASS file.
+level. The model also writes the concise Chinese explanations used when inline
+mode is enabled.
 
-The default batch size is five target dialogues and the default concurrency is
+The default batch size is fifteen target dialogues and the default concurrency is
 four requests. Nearby dialogues are included as context in each request. A
 separate decision or pre-filter model is not part of the shipped processing
 path.

@@ -68,6 +68,7 @@ def parser() -> argparse.ArgumentParser:
     )
     result.add_argument("input", type=Path, help="an ASS file or a directory of ASS files")
     result.add_argument("--level", choices=LEVELS, required=True, help="the learner's English level")
+    result.add_argument("--inline-mode", action="store_true", help="show Chinese annotations inline and below the English dialogue")
     result.add_argument("--recursive", action="store_true", help="include subdirectories")
     result.add_argument("--overwrite", action="store_true", help="replace existing generated output")
     result.add_argument("--dry-run", action="store_true", help="list input and output paths without calling the model")
@@ -228,11 +229,11 @@ def _convert_files(args: argparse.Namespace, clients: list[ModelClient]) -> int:
                 on_retry=lambda message: print(f"  {message}", file=sys.stderr, flush=True),
                 initial_results=cached, on_batch=checkpoint.save if checkpoint else None,
             )
-            result = subtitles.render(notes)
+            result = subtitles.render(notes, inline_mode=args.inline_mode)
             _write_output(output, result, args.overwrite)
             succeeded += 1
             print(f"Created: {output} ({len(subtitles.dialogues)} bilingual dialogue(s))")
-            if any(len(note) > 90 for note in notes.values()):
+            if args.inline_mode and any(len(note) > 90 for note in notes.values()):
                 print("  Some annotations may be too long for the available display time.")
         except (CheckpointError, ConfigError, ModelError, SubtitleError) as exc:
             failed += 1

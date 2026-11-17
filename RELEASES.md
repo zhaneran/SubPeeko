@@ -1,5 +1,23 @@
 # Releases
 
+## 0.3.0 — 2026-11-17
+
+The default conversion now preserves the original bilingual dialogue when
+above-level content is detected. Dialogues without such content display English
+alone. Use `--inline-mode` to restore the previous annotation layout.
+
+### Included
+
+- Set the default batch size to 15 dialogues and concurrency to 4 requests.
+- Preserve original dialogue styling and language order for above-level content.
+- Clarify model guidance for cumulative learner levels and contextual meanings.
+- Reuse saved model results when switching between output modes.
+
+### Package files
+
+- `subpeeko-0.3.0-py3-none-any.whl`
+- `subpeeko-0.3.0.tar.gz`
+
 ## 0.2.4 — 2026-11-15
 
 Status: prepared for publication.
